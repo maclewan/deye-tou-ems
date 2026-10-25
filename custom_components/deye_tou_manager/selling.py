@@ -75,10 +75,11 @@ def make_sell_plan(
     records: list[dict], day: date, unit: str, *, threshold: float,
     max_ranges: int, time_of_day: str,
 ) -> dict:
-    """Choose the most expensive contiguous above-threshold hourly ranges.
+    """Choose individual one-hour blocks above the configured threshold.
 
-    A range is a maximal run of eligible hours. All quarters in an hour share
-    that hour's average price. Ranking is by the run's mean, then peak price.
+    All four quarters in an hour share the same hourly settlement average.
+    Ranges are intentionally never merged: each block has to be approved and,
+    later, controlled independently.
     """
     if not isinstance(max_ranges, int) or isinstance(max_ranges, bool) or not 1 <= max_ranges <= 6:
         raise SellingPlanError("Range count must be between 1 and 6")
@@ -94,26 +95,15 @@ def make_sell_plan(
     permitted = range(0, 12) if time_of_day == "morning" else (
         range(12, 24) if time_of_day == "afternoon" else range(24)
     )
-    candidates = []
-    start = None
-    for hour in list(permitted) + [permitted.stop]:
-        eligible = hour < permitted.stop and prices[hour] >= threshold
-        if eligible and start is None:
-            start = hour
-        elif not eligible and start is not None:
-            values = prices[start:hour]
-            candidates.append({
-                "start": f"{start:02d}:00",
-                "end": f"{hour:02d}:00",
-                "average_price": round(sum(values) / len(values), 6),
-                "peak_price": round(max(values), 6),
-                "hours": [{"start": f"{h:02d}:00", "price": round(prices[h], 6)}
-                          for h in range(start, hour)],
-            })
-            start = None
-    selected = sorted(candidates, key=lambda item: (
-        -item["average_price"], -item["peak_price"], item["start"]
-    ))[:max_ranges]
+    candidates = [
+        {
+            "start": f"{hour:02d}:00", "end": f"{hour + 1:02d}:00",
+            "average_price": round(prices[hour], 6),
+            "hours": [{"start": f"{hour:02d}:00", "price": round(prices[hour], 6)}],
+        }
+        for hour in permitted if prices[hour] >= threshold
+    ]
+    selected = sorted(candidates, key=lambda item: (-item["average_price"], item["start"]))[:max_ranges]
     selected.sort(key=lambda item: item["start"])
     return {
         "date": day.isoformat(), "price_unit": "PLN/kWh",

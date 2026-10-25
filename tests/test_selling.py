@@ -41,7 +41,7 @@ class SellingPlannerTests(unittest.TestCase):
         self.assertAlmostEqual(SELLING.hourly_prices(records, self.day, "PLN/MWh")[1], .575)
         self.assertAlmostEqual(SELLING.hourly_prices(records, self.day, "PLN/kWh")[1], 575)
 
-    def test_threshold_groups_contiguous_hours_and_ranks_ranges(self):
+    def test_selects_individual_one_hour_ranges_and_ranks_them(self):
         hourly = [100.0] * 24
         hourly[7:9] = [600.0, 700.0]
         hourly[16:19] = [900.0, 950.0, 800.0]
@@ -51,8 +51,8 @@ class SellingPlannerTests(unittest.TestCase):
             threshold=.5, max_ranges=2, time_of_day="any",
         )
         self.assertEqual([(r["start"], r["end"]) for r in plan["ranges"]],
-                         [("07:00", "09:00"), ("16:00", "19:00")])
-        self.assertEqual(plan["ranges"][1]["average_price"], round(2.65 / 3, 6))
+                         [("16:00", "17:00"), ("17:00", "18:00")])
+        self.assertEqual(plan["ranges"][1]["average_price"], .95)
 
     def test_morning_preference_stops_at_noon(self):
         hourly = [500.0] * 24

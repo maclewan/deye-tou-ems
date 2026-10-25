@@ -78,7 +78,7 @@ After UI setup or a YAML configuration check and restart, `sensor.deye_tou_prese
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=0.5.2
+/api/deye_tou_manager/deye-tou-manager-card.js?v=0.5.3
 ```
 
 If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
@@ -113,7 +113,7 @@ The integration also registers these Home Assistant actions:
 | `deye_tou_manager.apply` | Apply a preset to the inverter | Yes |
 | `deye_tou_manager.set_selling_settings` | Configure price planning | No |
 | `deye_tou_manager.refresh_selling_plan` | Recalculate today's or tomorrow's plan | No |
-| `deye_tou_manager.approve_selling_plan` | Approve or unapprove a semi-automatic plan | No |
+| `deye_tou_manager.approve_selling_range` | Approve or unapprove one semi-automatic selling hour | No |
 
 Presets and assignments are stored by Home Assistant in `/config/.storage/deye_tou_manager`. Presets use stable SHA-256 keys, while names remain editable labels; weekday assignments reference those keys. Existing name-keyed storage is migrated automatically on the first startup with this release. Back up the storage file before upgrading, and do not edit the live file by hand. Existing service calls by name still work; to rename through `save_definition`, pass the existing key from the sensor's `preset_ids` attribute as `preset_id` with the new `name`.
 
@@ -127,9 +127,9 @@ The schedule uses Home Assistant local time. Manual and scheduled applies share 
 
 ## Energy selling work in progress
 
-The separate `custom:deye-tou-selling-card` uses the Lewa-Reka [RCE PSE integration](https://github.com/Lewa-Reka/ha-rce-pse). It detects Price and Price Tomorrow by their stable registry IDs, with optional entity overrides. The planner reads a complete day's 15-minute records, converts the sensor's PLN/MWh or PLN/kWh unit to PLN/kWh, computes hourly mean prices, and selects up to the configured number of highest-priced contiguous ranges above a threshold. It can limit candidates to morning or afternoon. Incomplete or inconsistent price data is rejected, including duplicate local times on a daylight-saving transition day.
+The separate `custom:deye-tou-selling-card` uses the Lewa-Reka [RCE PSE integration](https://github.com/Lewa-Reka/ha-rce-pse). In **Settings → Devices & services → Deye TOU Preset Manager → Configure**, select the RCE PSE **Price** and **Price Tomorrow** entities. The detected RCE PSE entities are preselected; choose the blank option to use automatic detection after a later RCE PSE setup. Entity selection uses the integration's stable IDs, so it works regardless of the Home Assistant display language. The planner reads a complete day's 15-minute records, converts the sensor's PLN/MWh or PLN/kWh unit to PLN/kWh, computes hourly mean prices, and selects up to the configured number of highest-priced **one-hour** blocks above a threshold. It can limit candidates to morning or afternoon. Incomplete or inconsistent price data is rejected, including duplicate local times on a daylight-saving transition day.
 
-Choose Off, semi-automatic approval, or automatic approval in the card. At 18:00 Home Assistant local time the manager plans tomorrow; at 00:00:15 it recalculates today. Automatic mode approves a valid midnight plan. Semi-automatic mode leaves approval to the card's checkbox. An unchanged plan retains its approval, while changed settings, changed prices, or missing price data revoke it. The card stores a minimum SOC and optional TOU discharge-power override for later control work. **All selling modes are currently planning-only: approval does not change inverter settings or export energy.** The card follows Home Assistant's language and supports the same English/Polish override as the preset card.
+Choose Off, semi-automatic approval, or automatic approval in the card. At 18:00 Home Assistant local time the manager plans tomorrow; at 00:00:15 it recalculates today. Each selected one-hour block has its own approval. Automatic mode approves every valid block during the midnight recheck. Semi-automatic mode requires each checkbox to be approved separately. An unchanged block retains its approval, while changed settings, changed prices, or missing price data revoke it. The card stores a minimum SOC and optional TOU discharge-power override for later control work. **All selling modes are currently planning-only: approval does not change inverter settings or export energy.** The card follows Home Assistant's language and supports the same English/Polish override as the preset card.
 
 ### Selling TODO
 
@@ -141,7 +141,7 @@ Choose Off, semi-automatic approval, or automatic approval in the card. At 18:00
 
 1. Back up `/config/.storage/deye_tou_manager`.
 2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
-3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.5.2` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for both cards.
+3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.5.3` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for both cards.
 4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
 
 The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged. This release migrates the preset and assignment format in that same storage file automatically; verify your presets and weekday assignments after restarting. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.

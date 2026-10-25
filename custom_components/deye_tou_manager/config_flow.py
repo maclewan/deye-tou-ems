@@ -4,7 +4,14 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 import voluptuous as vol
 
-from . import CONF_WORK_MODE_ENTITY, DOMAIN, work_mode_candidates
+from . import (
+    CONF_TODAY_PRICE_ENTITY,
+    CONF_TOMORROW_PRICE_ENTITY,
+    CONF_WORK_MODE_ENTITY,
+    DOMAIN,
+    rce_price_entities,
+    work_mode_candidates,
+)
 
 
 class DeyeTouManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -53,14 +60,34 @@ class DeyeTouManagerOptionsFlow(config_entries.OptionsFlow):
             candidates.sort()
         if not candidates:
             return self.async_abort(reason="no_compatible_entities")
+        price_entities = rce_price_entities(self.hass)
+        today_prices = ["", price_entities.get("today", "")]
+        tomorrow_prices = ["", price_entities.get("tomorrow", "")]
+        for values, current_key in (
+            (today_prices, CONF_TODAY_PRICE_ENTITY),
+            (tomorrow_prices, CONF_TOMORROW_PRICE_ENTITY),
+        ):
+            configured = self.config_entry.options.get(current_key, "")
+            if configured and configured not in values:
+                values.append(configured)
         if user_input is not None:
-            if user_input[CONF_WORK_MODE_ENTITY] in candidates:
+            if (user_input[CONF_WORK_MODE_ENTITY] in candidates
+                    and user_input[CONF_TODAY_PRICE_ENTITY] in today_prices
+                    and user_input[CONF_TOMORROW_PRICE_ENTITY] in tomorrow_prices):
                 return self.async_create_entry(title="", data=user_input)
             errors = {"base": "invalid_entity"}
         else:
             errors = {}
         key = vol.Required(CONF_WORK_MODE_ENTITY, default=current or candidates[0])
         return self.async_show_form(
-            step_id="init", data_schema=vol.Schema({key: vol.In(candidates)}),
+            step_id="init", data_schema=vol.Schema({
+                key: vol.In(candidates),
+                vol.Required(CONF_TODAY_PRICE_ENTITY, default=self.config_entry.options.get(
+                    CONF_TODAY_PRICE_ENTITY, price_entities.get("today", "")
+                )): vol.In(today_prices),
+                vol.Required(CONF_TOMORROW_PRICE_ENTITY, default=self.config_entry.options.get(
+                    CONF_TOMORROW_PRICE_ENTITY, price_entities.get("tomorrow", "")
+                )): vol.In(tomorrow_prices),
+            }),
             errors=errors,
         )

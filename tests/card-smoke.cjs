@@ -128,14 +128,13 @@ sellingCard.hass = { states: {
     selling: {settings: {mode:"semi", threshold:.5, max_ranges:2, time_of_day:"afternoon",
       min_soc:30, power_override:null, today_price_entity:"", tomorrow_price_entity:""},
       plans: {"2026-10-26": {date:"2026-10-26", source_entity:"sensor.rce_pse_price",
-        ranges:[{start:"18:00", end:"19:00", average_price:.8, hours:[{start:"18:00",price:.8}]}],
-        approved:false}}, error:""},
+        ranges:[{start:"18:00", end:"19:00", average_price:.8, hours:[{start:"18:00",price:.8}], approved:false}]}}, error:""},
   } },
 } };
 assert.match(sellingCard.shadowRoot.innerHTML, /Energy selling planner/);
 assert.match(sellingCard.shadowRoot.innerHTML, /18:00–19:00/);
 assert.match(sellingCard.shadowRoot.innerHTML, /Planning and approval only/);
-assert.match(sellingCard.shadowRoot.innerHTML, /data-approve="2026-10-26"/);
+assert.match(sellingCard.shadowRoot.innerHTML, /data-approve-date="2026-10-26"/);
 
 async function testRename() {
   const calls = [];
@@ -158,7 +157,7 @@ async function testRename() {
   assert.equal(card._editor.presetId, "stable-hash-id");
   assert.equal(card._pendingSavedName, null);
   global.fetch = async url => {
-    assert.match(url, /card-pl\.json\?v=0\.5\.2$/);
+    assert.match(url, /card-pl\.json\?v=0\.5\.3$/);
     return { ok: true, json: async () => polish };
   };
   card.hass = { ...card._hass, language: "pl" };
@@ -179,8 +178,8 @@ async function testRename() {
   const uncachedCard = new Card();
   uncachedCard.setConfig({});
   global.fetch = async url => {
-    if (/card-pl\.json\?v=0\.5\.2$/.test(url)) return { ok: false };
-    assert.match(url, /card-en\.json\?v=0\.5\.2$/);
+    if (/card-pl\.json\?v=0\.5\.3$/.test(url)) return { ok: false };
+    assert.match(url, /card-en\.json\?v=0\.5\.3$/);
     return { ok: true, json: async () => english };
   };
   uncachedCard.hass = { language: "pl", states: {} };

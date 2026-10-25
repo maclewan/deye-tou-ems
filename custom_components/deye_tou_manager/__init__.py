@@ -32,12 +32,14 @@ from .selling import SellingPlanError, make_sell_plan
 DOMAIN = "deye_tou_manager"
 ENTITY = "sensor.deye_tou_preset_manager"
 CONF_WORK_MODE_ENTITY = "work_mode_entity"
+CONF_TODAY_PRICE_ENTITY = "today_price_entity"
+CONF_TOMORROW_PRICE_ENTITY = "tomorrow_price_entity"
 WORK_MODE_SUFFIX = "_system_work_mode"
 LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
-CARD_VERSION = "0.5.2"
+CARD_VERSION = "0.5.3"
 CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
 CARD_TRANSLATION_URL = "/api/deye_tou_manager/card-{language}.json"
@@ -287,6 +289,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             work_mode_entity=resolve_work_mode_entity(
                 hass, settings.get(CONF_WORK_MODE_ENTITY)
             ),
+            selling_price_entities={
+                CONF_TODAY_PRICE_ENTITY: settings.get(CONF_TODAY_PRICE_ENTITY, ""),
+                CONF_TOMORROW_PRICE_ENTITY: settings.get(CONF_TOMORROW_PRICE_ENTITY, ""),
+            },
         )
     return True
 
@@ -301,6 +307,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     CONF_WORK_MODE_ENTITY, entry.data.get(CONF_WORK_MODE_ENTITY)
                 )
             ),
+            selling_price_entities={
+                CONF_TODAY_PRICE_ENTITY: entry.options.get(CONF_TODAY_PRICE_ENTITY, ""),
+                CONF_TOMORROW_PRICE_ENTITY: entry.options.get(CONF_TOMORROW_PRICE_ENTITY, ""),
+            },
         )
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     return True
@@ -321,7 +331,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime["unsub_start"]()
     runtime["unsub_selling_time"]()
     for service in ("save_current", "save_definition", "delete", "assign_day", "apply", "set_auto",
-                    "set_selling_settings", "refresh_selling_plan", "approve_selling_plan"):
+                    "set_selling_settings", "refresh_selling_plan", "approve_selling_range"):
         hass.services.async_remove(DOMAIN, service)
     hass.states.async_remove(ENTITY)
     hass.data.pop(DOMAIN)
@@ -329,7 +339,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_start_manager(
-    hass: HomeAssistant, *, yaml_configured: bool, work_mode_entity: str
+    hass: HomeAssistant, *, yaml_configured: bool, work_mode_entity: str,
+    selling_price_entities: dict[str, str] | None = None,
 ) -> None:
     """Initialize the one shared manager for YAML or UI configuration."""
     prefix = prefix_from_work_mode(work_mode_entity)
@@ -359,6 +370,11 @@ async def _async_start_manager(
     except HomeAssistantError:
         _LOGGER.warning("Invalid saved selling settings; selling planning disabled")
         selling_settings = SELLING_DEFAULTS.copy()
+    configured_price_entities = selling_price_entities or {}
+    for key in (CONF_TODAY_PRICE_ENTITY, CONF_TOMORROW_PRICE_ENTITY):
+        if key in configured_price_entities:
+            selling_settings[key] = configured_price_entities[key]
+    selling_settings_changed = selling_settings != saved_selling.get("settings", {})
     selling = {
         "settings": selling_settings,
         "plans": saved_selling.get("plans") if isinstance(saved_selling.get("plans"), dict) else {},
@@ -368,7 +384,9 @@ async def _async_start_manager(
     if selling_settings["mode"] == "off":
         for plan in selling["plans"].values():
             if isinstance(plan, dict):
-                plan["approved"] = False
+                for selling_range in plan.get("ranges", []):
+                    if isinstance(selling_range, dict):
+                        selling_range["approved"] = False
     previous_entity = saved.get(
         CONF_WORK_MODE_ENTITY, LEGACY_WORK_MODE_ENTITY if saved else work_mode_entity
     )
@@ -378,7 +396,8 @@ async def _async_start_manager(
             "Deye Work Mode target changed from %s to %s; weekly schedule disabled",
             previous_entity, work_mode_entity,
         )
-    if (migrating or saved.get(CONF_WORK_MODE_ENTITY) != work_mode_entity
+    if (migrating or selling_settings_changed
+            or saved.get(CONF_WORK_MODE_ENTITY) != work_mode_entity
             or saved.get("auto_enabled") != auto_enabled):
         await store.async_save({
             "preset_schema": 2, "presets": presets, "assignments": assignments,
@@ -409,7 +428,13 @@ async def _async_start_manager(
             "work_mode_entity": work_mode_entity,
             "last_automatic": last_automatic,
             "selling": copy.deepcopy(selling),
-            "rce_price_entities": rce_price_entities(hass),
+            "rce_price_entities": {
+                **rce_price_entities(hass),
+                "today": selling_settings[CONF_TODAY_PRICE_ENTITY]
+                    or rce_price_entities(hass).get("today", ""),
+                "tomorrow": selling_settings[CONF_TOMORROW_PRICE_ENTITY]
+                    or rce_price_entities(hass).get("tomorrow", ""),
+            },
             "ha_local_date": dt_util.now().date().isoformat(),
             "last_updated": datetime.now().isoformat(timespec="seconds"),
         })
@@ -590,12 +615,16 @@ async def _async_start_manager(
                 plan["source_entity"] = entity_id
                 plan["id"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
                 previous = selling["plans"].get(target.isoformat(), {})
-                plan["approved"] = bool(
-                    plan["ranges"] and settings["mode"] != "off" and (
-                        (previous.get("id") == plan["id"] and previous.get("approved"))
-                        or (midnight_check and settings["mode"] == "automatic")
+                preserve_approval = previous.get("id") == plan["id"]
+                for selling_range in plan["ranges"]:
+                    old_range = next((item for item in previous.get("ranges", [])
+                                      if item.get("start") == selling_range["start"]), {})
+                    selling_range["approved"] = bool(
+                        settings["mode"] != "off" and (
+                            (preserve_approval and old_range.get("approved"))
+                            or (midnight_check and settings["mode"] == "automatic")
+                        )
                     )
-                )
                 selling["plans"] = {
                     key: value for key, value in selling["plans"].items()
                     if key >= now.date().isoformat() and key <= (now.date() + timedelta(days=1)).isoformat()
@@ -611,18 +640,22 @@ async def _async_start_manager(
     async def refresh_selling_plan(call: ServiceCall) -> None:
         await refresh_selling_plan_for(call.data.get("day", "tomorrow"))
 
-    async def approve_selling_plan(call: ServiceCall) -> None:
+    async def approve_selling_range(call: ServiceCall) -> None:
         async with lock:
             if selling["settings"]["mode"] != "semi":
                 raise HomeAssistantError("Manual approval requires semi-automatic mode")
             date_key = call.data["date"]
             today = dt_util.now().date()
             if date_key not in (today.isoformat(), (today + timedelta(days=1)).isoformat()):
-                raise HomeAssistantError("Only today's or tomorrow's plan can be approved")
+                raise HomeAssistantError("Only today's or tomorrow's selling range can be approved")
             plan = selling["plans"].get(date_key)
             if not plan or not plan.get("ranges"):
-                raise HomeAssistantError("No valid selling plan to approve")
-            plan["approved"] = call.data["approved"]
+                raise HomeAssistantError("No valid selling range to approve")
+            selling_range = next((item for item in plan["ranges"]
+                                  if item["start"] == call.data["start"]), None)
+            if selling_range is None:
+                raise HomeAssistantError("Selling range not found")
+            selling_range["approved"] = call.data["approved"]
             await persist()
 
     async def run_scheduled(reason: str) -> None:
@@ -697,8 +730,10 @@ async def _async_start_manager(
         schema=vol.Schema({vol.Optional(key): object for key in SELLING_DEFAULTS}))
     hass.services.async_register(DOMAIN, "refresh_selling_plan", refresh_selling_plan,
         schema=vol.Schema({vol.Optional("day", default="tomorrow"): vol.In(("today", "tomorrow"))}))
-    hass.services.async_register(DOMAIN, "approve_selling_plan", approve_selling_plan,
-        schema=vol.Schema({vol.Required("date"): str, vol.Required("approved"): bool}))
+    hass.services.async_register(DOMAIN, "approve_selling_range", approve_selling_range,
+        schema=vol.Schema({
+            vol.Required("date"): str, vol.Required("start"): str, vol.Required("approved"): bool,
+        }))
 
     @callback
     def at_midnight(_now) -> None:

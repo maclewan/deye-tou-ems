@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.5.2";
+const CARD_TRANSLATION_VERSION = "0.5.3";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -437,10 +437,10 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
         <p class="muted">${this.h("sellingSource")}: ${this.escape(plan.source_entity)}</p>
         ${plan.ranges?.length ? plan.ranges.map(range => `<div class="range"><b>${this.escape(range.start)}–${this.escape(range.end)}</b>
           <span>${this.h("sellingAverage")}: ${this.escape(range.average_price)} PLN/kWh</span>
+          <label class="approval"><input type="checkbox" data-approve-date="${dateKey}" data-approve-start="${this.escape(range.start)}" ${range.approved ? "checked" : ""}
+            ${settings.mode === "semi" ? "" : "disabled"}>${this.h("sellingApproved")}</label>
           <small>${range.hours.map(hour => `${this.escape(hour.start)} ${this.escape(hour.price)}`).join(" · ")}</small></div>`).join("")
           : `<p class="muted">${this.h("sellingBelowThreshold")}</p>`}
-        <label class="approval"><input type="checkbox" data-approve="${dateKey}" ${plan.approved ? "checked" : ""}
-          ${settings.mode === "semi" && plan.ranges?.length ? "" : "disabled"}>${this.h("sellingApproved")}</label>
       </section>`;
     };
     this.shadowRoot.innerHTML = `<style>
@@ -471,11 +471,10 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
         ${select("sell-period","sellingPeriod",settings.time_of_day,[["morning","sellingMorning"],["afternoon","sellingAfternoon"],["any","sellingAny"]])}
         ${field("sell-soc","sellingMinSoc","number",settings.min_soc,'min="0" max="100" step="1"')}
         ${field("sell-power","sellingPower","number",settings.power_override,'min="1" max="12000" step="1"')}
-        ${field("sell-today-entity","sellingTodayEntity","text",settings.today_price_entity,`placeholder="${this.escape(detected.today || this.tr("sellingAutoDetect"))}"`)}
-        ${field("sell-tomorrow-entity","sellingTomorrowEntity","text",settings.tomorrow_price_entity,`placeholder="${this.escape(detected.tomorrow || this.tr("sellingAutoDetect"))}"`)}
       </div><div class="actions"><button class="primary" id="sell-save">${this.h("sellingSave")}</button>
         <button id="sell-check-today">${this.h("sellingCheckToday")}</button>
         <button id="sell-check-tomorrow">${this.h("sellingCheckTomorrow")}</button></div>
+      <p class="muted">${this.h("sellingEntityConfigNote", {today:detected.today || this.tr("sellingAutoDetect"), tomorrow:detected.tomorrow || this.tr("sellingAutoDetect")})}</p>
       <p class="muted">${this.h("sellingScheduleNote")}</p>
       ${selling.error ? `<p class="warning">${this.escape(selling.error)}</p>` : ""}
       ${planHtml("today")}${planHtml("tomorrow")}`}
@@ -486,12 +485,11 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       try { window.localStorage?.setItem(CARD_LANGUAGE_KEY, this._languageChoice); } catch (_) { /* unavailable */ }
       this.updateLanguage(); this.render();
     });
-    const ids = ["sell-mode","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power","sell-today-entity","sell-tomorrow-entity"];
+    const ids = ["sell-mode","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power"];
     const readSettings = () => ({
       mode:$("sell-mode").value, threshold:Number($("sell-threshold").value),
       max_ranges:Number($("sell-ranges").value), time_of_day:$("sell-period").value,
-      min_soc:Number($("sell-soc").value), power_override:$("sell-power").value === "" ? null : Number($("sell-power").value),
-      today_price_entity:$("sell-today-entity").value.trim(), tomorrow_price_entity:$("sell-tomorrow-entity").value.trim()
+      min_soc:Number($("sell-soc").value), power_override:$("sell-power").value === "" ? null : Number($("sell-power").value)
     });
     ids.forEach(id => $(id)?.addEventListener("change", () => { this._settingsDraft = readSettings(); }));
     $("sell-save")?.addEventListener("click", async () => {
@@ -501,8 +499,9 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     });
     $("sell-check-today")?.addEventListener("click", () => this.act("refresh_selling_plan", {day:"today"}));
     $("sell-check-tomorrow")?.addEventListener("click", () => this.act("refresh_selling_plan", {day:"tomorrow"}));
-    this.shadowRoot.querySelectorAll("[data-approve]").forEach(el => el.addEventListener("change", event =>
-      this.act("approve_selling_plan", {date:event.target.dataset.approve, approved:event.target.checked})));
+    this.shadowRoot.querySelectorAll("[data-approve-date]").forEach(el => el.addEventListener("change", event =>
+      this.act("approve_selling_range", {date:event.target.dataset.approveDate,
+        start:event.target.dataset.approveStart, approved:event.target.checked})));
   }
 }
 if (!customElements.get("deye-tou-selling-card"))

@@ -396,13 +396,56 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         flow.hass = FakeHass()
         put_live(flow.hass, sample_preset(), prefix="new")
         self.assertEqual((await flow.async_step_init())["type"], "form")
-        self.assertEqual(await flow.async_step_init({MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode"}), {
+        self.assertEqual(await flow.async_step_init({
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode",
+            MANAGER.CONF_TODAY_PRICE_ENTITY: "",
+            MANAGER.CONF_TOMORROW_PRICE_ENTITY: "",
+        }), {
             "type": "create_entry", "title": "",
-            "data": {MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode"},
+            "data": {
+                MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode",
+                MANAGER.CONF_TODAY_PRICE_ENTITY: "",
+                MANAGER.CONF_TOMORROW_PRICE_ENTITY: "",
+            },
         })
+
+    async def test_options_can_select_rce_price_entities(self):
+        entry = FakeEntry(data={MANAGER.CONF_WORK_MODE_ENTITY: "select.old_system_work_mode"})
+        flow = CONFIG_FLOW.DeyeTouManagerConfigFlow.async_get_options_flow(entry)
+        flow.config_entry = entry
+        flow.hass = FakeHass()
+        put_live(flow.hass, sample_preset(), prefix="new")
+        today = put_rce_prices(flow.hass, date(2026, 10, 26), "price")
+        tomorrow = put_rce_prices(flow.hass, date(2026, 10, 27), "price_tomorrow")
+        self.assertEqual((await flow.async_step_init())["type"], "form")
+        result = await flow.async_step_init({
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode",
+            MANAGER.CONF_TODAY_PRICE_ENTITY: today,
+            MANAGER.CONF_TOMORROW_PRICE_ENTITY: tomorrow,
+        })
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(result["data"][MANAGER.CONF_TODAY_PRICE_ENTITY], today)
+        self.assertEqual(result["data"][MANAGER.CONF_TOMORROW_PRICE_ENTITY], tomorrow)
 
 
 class ResourceAndSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_entry_options_set_the_price_entities_used_by_selling(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset())
+        today = put_rce_prices(hass, date(2026, 10, 26), "price")
+        tomorrow = put_rce_prices(hass, date(2026, 10, 27), "price_tomorrow")
+        entry = FakeEntry(
+            data={MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_inverter_esp32_system_work_mode"},
+            options={
+                MANAGER.CONF_TODAY_PRICE_ENTITY: today,
+                MANAGER.CONF_TOMORROW_PRICE_ENTITY: tomorrow,
+            },
+        )
+        await MANAGER.async_setup_entry(hass, entry)
+        settings = hass.states[MANAGER.ENTITY].attributes["selling"]["settings"]
+        self.assertEqual(settings[MANAGER.CONF_TODAY_PRICE_ENTITY], today)
+        self.assertEqual(settings[MANAGER.CONF_TOMORROW_PRICE_ENTITY], tomorrow)
+
     async def test_auto_detects_one_nondefault_inverter_for_legacy_yaml(self):
         hass = FakeHass()
         put_live(hass, sample_preset(), prefix="my_deye")
@@ -593,7 +636,10 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.hass.services.writes, [])
 
     async def test_semi_selling_card_plan_and_approval_are_persisted_without_writes(self):
-        put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
+        price_entity = put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
+        for record in self.hass.states[price_entity].attributes["prices"]:
+            if record["period"].startswith("19:"):
+                record["rce_pln"] = 800
         await self.call("set_selling_settings", mode="semi", threshold=.5,
                         max_ranges=2, time_of_day="afternoon", min_soc=30)
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
@@ -603,31 +649,40 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         plan = selling["plans"]["2026-10-27"]
         self.assertEqual((plan["ranges"][0]["start"], plan["ranges"][0]["end"]),
                          ("18:00", "19:00"))
-        self.assertFalse(plan["approved"])
-        await self.call("approve_selling_plan", date="2026-10-27", approved=True)
-        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        self.assertFalse(plan["ranges"][0]["approved"])
+        self.assertFalse(plan["ranges"][1]["approved"])
+        await self.call("approve_selling_range", date="2026-10-27", start="18:00", approved=True)
+        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][0]["approved"])
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][1]["approved"])
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
             await self.call("refresh_selling_plan", day="tomorrow")
-        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][0]["approved"])
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][1]["approved"])
         put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow", high_hour=17)
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
             await self.call("refresh_selling_plan", day="tomorrow")
-        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][0]["approved"])
         self.assertEqual(self.hass.services.writes, [])
 
     async def test_automatic_selling_approves_only_after_midnight_recheck(self):
-        put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
-        put_rce_prices(self.hass, date(2026, 10, 27), "price")
+        tomorrow_entity = put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
+        today_entity = put_rce_prices(self.hass, date(2026, 10, 27), "price")
+        for entity in (tomorrow_entity, today_entity):
+            for record in self.hass.states[entity].attributes["prices"]:
+                if record["period"].startswith("19:"):
+                    record["rce_pln"] = 800
         await self.call("set_selling_settings", mode="automatic", threshold=.5,
                         max_ranges=2, time_of_day="afternoon", min_soc=30)
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
             self.hass.evening_callback(None)
             await self.hass.finish_tasks()
-        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][0]["approved"])
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][1]["approved"])
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 27, 0, 0, 15)):
             self.hass.midnight_callback(None)
             await self.hass.finish_tasks()
-        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][0]["approved"])
+        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"][1]["approved"])
         self.assertEqual(self.hass.services.writes, [])
 
     async def test_missing_rce_prices_revokes_plan_approval(self):

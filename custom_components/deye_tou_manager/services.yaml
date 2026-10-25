@@ -151,12 +151,17 @@ refresh_selling_plan:
           options:
             - today
             - tomorrow
-approve_selling_plan:
-  name: Approve selling plan
-  description: Mark a semi-automatic plan approved or unapproved. Does not change the inverter.
+approve_selling_range:
+  name: Approve selling hour
+  description: Approve or unapprove one semi-automatic one-hour selling block. Does not change the inverter.
   fields:
     date:
       name: Plan date (YYYY-MM-DD)
+      required: true
+      selector:
+        text:
+    start:
+      name: Selling hour start (HH:MM)
       required: true
       selector:
         text:
