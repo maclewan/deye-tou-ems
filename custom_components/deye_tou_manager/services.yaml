@@ -13,7 +13,7 @@ save_current:
         boolean:
 save_definition:
   name: Save preset definition
-  description: Save or edit a preset in Home Assistant without changing the inverter.
+  description: Save, edit, or rename a preset in Home Assistant without changing the inverter. Pass preset_id to rename an existing preset.
   fields:
     name:
       name: Preset name
@@ -26,6 +26,11 @@ save_definition:
       required: true
       selector:
         object:
+    preset_id:
+      name: Existing preset ID
+      description: Stable ID from the manager sensor's preset_ids attribute; keeps weekday assignments when changing the name.
+      selector:
+        text:
     overwrite:
       name: Overwrite existing preset
       selector:
@@ -76,6 +81,87 @@ set_auto:
   fields:
     enabled:
       name: Enabled
+      required: true
+      selector:
+        boolean:
+set_selling_settings:
+  name: Set selling planning settings
+  description: Save price-planning settings only; does not change inverter settings.
+  fields:
+    mode:
+      name: Planning mode
+      selector:
+        select:
+          options:
+            - off
+            - semi
+            - automatic
+    threshold:
+      name: Minimum hourly price (PLN/kWh)
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 0.01
+    max_ranges:
+      name: Maximum ranges
+      selector:
+        number:
+          min: 1
+          max: 6
+          step: 1
+    time_of_day:
+      name: Time of day
+      selector:
+        select:
+          options:
+            - morning
+            - afternoon
+            - any
+    min_soc:
+      name: Minimum battery SOC (future control limit)
+      selector:
+        number:
+          min: 0
+          max: 100
+    power_override:
+      name: TOU discharge power override (W)
+      selector:
+        number:
+          min: 1
+          max: 12000
+    today_price_entity:
+      name: RCE PSE Price entity override
+      selector:
+        entity:
+          domain: sensor
+    tomorrow_price_entity:
+      name: RCE PSE Price Tomorrow entity override
+      selector:
+        entity:
+          domain: sensor
+refresh_selling_plan:
+  name: Refresh selling plan
+  description: Calculate a price-based plan for today or tomorrow. Does not change the inverter.
+  fields:
+    day:
+      name: Day
+      selector:
+        select:
+          options:
+            - today
+            - tomorrow
+approve_selling_plan:
+  name: Approve selling plan
+  description: Mark a semi-automatic plan approved or unapproved. Does not change the inverter.
+  fields:
+    date:
+      name: Plan date (YYYY-MM-DD)
+      required: true
+      selector:
+        text:
+    approved:
+      name: Approved
       required: true
       selector:
         boolean:

@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Skonfiguruj menedżer presetów Deye TOU",
+        "description": "Wybierz encję trybu pracy falownika Lewa-Reka ESPHome. Pozostałe kontrolki TOU zostaną dopasowane na podstawie tego samego prefiksu. Konfiguracja nie zmienia ustawień falownika.",
+        "data": {
+          "work_mode_entity": "Encja trybu pracy falownika"
+        }
+      }
+    },
+    "error": {
+      "invalid_entity": "Wybierz jedną z wykrytych encji trybu pracy."
+    },
+    "abort": {
+      "no_compatible_entities": "Nie znaleziono zgodnej encji trybu pracy. Najpierw skonfiguruj falownik Lewa-Reka ESPHome, a potem spróbuj ponownie."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wybierz falownik Deye",
+        "data": {
+          "work_mode_entity": "Encja trybu pracy falownika"
+        }
+      }
+    },
+    "error": {
+      "invalid_entity": "Wybierz jedną z wykrytych encji trybu pracy."
+    },
+    "abort": {
+      "no_compatible_entities": "Nie znaleziono zgodnej encji trybu pracy."
+    }
+  }
+}

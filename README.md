@@ -11,7 +11,7 @@ A Home Assistant custom integration and dashboard card for managing named, six-s
 ## Features
 
 - Save the inverter's current TOU settings as a named preset.
-- Create, edit, duplicate, and delete presets in Home Assistant without changing the inverter.
+- Create, rename, edit, duplicate, and delete presets in Home Assistant without changing the inverter.
 - Assign a different preset to each weekday.
 - Select the Lewa-Reka ESPHome inverter during setup; entity IDs are derived from its Work Mode entity.
 - Apply a preset manually, or enable the built-in schedule for 00:00:15 and Home Assistant startup.
@@ -73,12 +73,12 @@ deye_tou_manager:
 The other entity IDs must retain the Lewa-Reka suffixes shown above. If they have been renamed individually, selecting Work Mode alone cannot map them.
 For reliable YAML startup when ESPHome is offline, set `work_mode_entity` explicitly. Older YAML installs with no detected entity retain the previous `deye_inverter_esp32` target as a compatibility fallback.
 
-After UI setup or a YAML configuration check and restart, `sensor.deye_tou_preset_manager` should appear with `presets`, `assignments`, and `auto_enabled` attributes. To move from YAML to UI setup, remove the YAML entry, restart, and add the integration through **Devices & services**; the saved presets use the same storage key.
+After UI setup or a YAML configuration check and restart, `sensor.deye_tou_preset_manager` should appear with `presets`, `preset_ids`, `assignments`, and `auto_enabled` attributes. To move from YAML to UI setup, remove the YAML entry, restart, and add the integration through **Devices & services**; the saved presets use the same storage key.
 
-With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for this card at:
+With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.4
+/api/deye_tou_manager/deye-tou-manager-card.js?v=0.5.2
 ```
 
 If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
@@ -89,11 +89,17 @@ Add a manual card to your dashboard:
 type: custom:deye-tou-manager-card
 ```
 
+Add the separate energy-selling planner card wherever you want it:
+
+```yaml
+type: custom:deye-tou-selling-card
+```
+
 After a card update, refresh the browser. Storage-mode resource URLs are updated by the integration when needed; YAML-mode resource URLs remain your responsibility.
 
 ## Usage
 
-The compact section at the top shows the inverter's **live** Work Mode, Solar Sell, TOU, and six slot readings in a single vertical list; it is read-only. Each slot shows its start and calculated end time. The editor also shows a read-only end-time column that updates when you change a start time. A slot ends when the next one starts; the sixth ends at the first slot's start on the next day. Selecting a saved preset opens its full editor by default. Edit it offline, duplicate it, start a blank preset, or capture the inverter's current values as a new preset. Assign presets to weekdays and use **Wczytaj do Deye** to apply one manually. Turn on **Włącz harmonogram tygodniowy** only after checking the assignments. The card shows the latest automatic result.
+The compact section at the top shows the inverter's **live** Work Mode, Solar Sell, TOU, and six slot readings in a single vertical list; it is read-only. Each slot shows its start and calculated end time. The editor also shows a read-only end-time column that updates when you change a start time. A slot ends when the next one starts; the sixth ends at the first slot's start on the next day. Selecting a saved preset opens its full editor by default. Edit its name or settings offline, duplicate it, start a blank preset, or capture the inverter's current values as a new preset. Renaming retains weekday assignments. Assign presets to weekdays and use **Apply to Deye** to apply one manually. Turn on **Enable weekly schedule** only after checking the assignments. The card shows the latest automatic result. The card follows Home Assistant's language by default (English or Polish); its **Language** selector can override that choice and remembers it in the browser.
 
 The integration also registers these Home Assistant actions:
 
@@ -105,8 +111,11 @@ The integration also registers these Home Assistant actions:
 | `deye_tou_manager.assign_day` | Assign or clear a weekday preset | No |
 | `deye_tou_manager.set_auto` | Enable or disable the built-in schedule | No immediate write |
 | `deye_tou_manager.apply` | Apply a preset to the inverter | Yes |
+| `deye_tou_manager.set_selling_settings` | Configure price planning | No |
+| `deye_tou_manager.refresh_selling_plan` | Recalculate today's or tomorrow's plan | No |
+| `deye_tou_manager.approve_selling_plan` | Approve or unapprove a semi-automatic plan | No |
 
-Presets and assignments are stored by Home Assistant in `/config/.storage/deye_tou_manager`. Do not edit the live storage file by hand.
+Presets and assignments are stored by Home Assistant in `/config/.storage/deye_tou_manager`. Presets use stable SHA-256 keys, while names remain editable labels; weekday assignments reference those keys. Existing name-keyed storage is migrated automatically on the first startup with this release. Back up the storage file before upgrading, and do not edit the live file by hand. Existing service calls by name still work; to rename through `save_definition`, pass the existing key from the sensor's `preset_ids` attribute as `preset_id` with the new `name`.
 
 ### Apply behavior and safety
 
@@ -116,14 +125,26 @@ Readback waits for up to 30 seconds. Slow ESPHome updates can therefore report a
 
 The schedule uses Home Assistant local time. Manual and scheduled applies share a lock, so they cannot write concurrently.
 
+## Energy selling work in progress
+
+The separate `custom:deye-tou-selling-card` uses the Lewa-Reka [RCE PSE integration](https://github.com/Lewa-Reka/ha-rce-pse). It detects Price and Price Tomorrow by their stable registry IDs, with optional entity overrides. The planner reads a complete day's 15-minute records, converts the sensor's PLN/MWh or PLN/kWh unit to PLN/kWh, computes hourly mean prices, and selects up to the configured number of highest-priced contiguous ranges above a threshold. It can limit candidates to morning or afternoon. Incomplete or inconsistent price data is rejected, including duplicate local times on a daylight-saving transition day.
+
+Choose Off, semi-automatic approval, or automatic approval in the card. At 18:00 Home Assistant local time the manager plans tomorrow; at 00:00:15 it recalculates today. Automatic mode approves a valid midnight plan. Semi-automatic mode leaves approval to the card's checkbox. An unchanged plan retains its approval, while changed settings, changed prices, or missing price data revoke it. The card stores a minimum SOC and optional TOU discharge-power override for later control work. **All selling modes are currently planning-only: approval does not change inverter settings or export energy.** The card follows Home Assistant's language and supports the same English/Polish override as the preset card.
+
+### Selling TODO
+
+- Verify a temporary selling configuration on the actual inverter, wire the minimum SOC and optional TOU discharge-power override to controlled writes, and restore the normal plan afterward. Keep physical selling disabled until the required battery SOC and export-meter entities and inverter behavior are confirmed.
+- Add Home Assistant notifications for proposed/approved plans; make the notification target configurable later.
+- Capture cumulative grid-export energy at hour boundaries, save hourly energy and estimated revenue plus an end-of-day record, and add a separate history card later. Missing meter samples must never be estimated as measured sales.
+
 ## Upgrading from the manual 0.3.0 installation
 
 1. Back up `/config/.storage/deye_tou_manager`.
 2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
-3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.4` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for this card.
+3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.5.2` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for both cards.
 4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
 
-The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged, so saved presets need no migration. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.
+The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged. This release migrates the preset and assignment format in that same storage file automatically; verify your presets and weekday assignments after restarting. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.
 
 ## Troubleshooting
 

@@ -8,7 +8,7 @@ import importlib.util
 import sys
 import types
 import unittest
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -147,6 +147,7 @@ class FakeHass:
         self.static_paths = []
         self.listeners = {}
         self.midnight_callback = None
+        self.evening_callback = None
         self.tasks = []
         self.http = SimpleNamespace(async_register_static_paths=self.register_paths)
         self.bus = SimpleNamespace(async_listen_once=self.listen_once)
@@ -203,8 +204,9 @@ def load_integration():
     modules["homeassistant.core"].callback = lambda method: method
     modules["homeassistant.exceptions"].HomeAssistantError = type("HomeAssistantError", (Exception,), {})
     def track_time(hass, callback, **kwargs):
-        hass.midnight_callback = callback
-        return lambda: setattr(hass, "midnight_callback", None)
+        field = "evening_callback" if kwargs.get("hour") == 18 else "midnight_callback"
+        setattr(hass, field, callback)
+        return lambda: setattr(hass, field, None)
     modules["homeassistant.helpers.event"].async_track_time_change = track_time
     modules["homeassistant.helpers.entity_registry"].async_get = lambda hass: SimpleNamespace(
         entities=hass.registry_entities,
@@ -308,6 +310,26 @@ def put_live(hass, preset, prefix=TEST_PREFIX):
             ("switch", "gen", "on" if slot["gen"] else "off"),
         ):
             hass.states.async_set(MANAGER.slot_id(prefix, domain, index, key), value)
+
+
+def put_rce_prices(hass, day, suffix, high_hour=18, high_price=900):
+    entity_id = f"sensor.rce_pse_{suffix}"
+    unique_id = "rce_pse_today_price" if suffix == "price" else "rce_pse_tomorrow_price"
+    hass.registry_entities[entity_id] = SimpleNamespace(
+        entity_id=entity_id, platform="rce_pse", unique_id=unique_id, disabled_by=None,
+    )
+    records = []
+    for hour in range(24):
+        for minute in (0, 15, 30, 45):
+            start = datetime.combine(day, time()) + timedelta(hours=hour, minutes=minute)
+            end = start + timedelta(minutes=15)
+            records.append({
+                "business_date": day.isoformat(), "period": f"{start:%H:%M} - {end:%H:%M}",
+                "dtime": end.strftime("%Y-%m-%d %H:%M:%S"),
+                "rce_pln": high_price if hour == high_hour else 100,
+            })
+    hass.states.async_set(entity_id, "100", {"unit_of_measurement": "PLN/MWh", "prices": records})
+    return entity_id
 
 
 async def no_delay(_seconds):
@@ -442,7 +464,10 @@ class ResourceAndSetupTests(unittest.IsolatedAsyncioTestCase):
         await MANAGER.async_setup_entry(hass, entry)
         self.assertFalse(hass.states[MANAGER.ENTITY].attributes["auto_enabled"])
         self.assertFalse(hass.saved["auto_enabled"])
-        self.assertEqual(hass.saved["assignments"]["monday"], "Target")
+        self.assertEqual(
+            hass.saved["assignments"]["monday"],
+            hass.states[MANAGER.ENTITY].attributes["preset_ids"]["Target"],
+        )
         hass.midnight_callback(None)
         await hass.finish_tasks()
         self.assertEqual(hass.services.writes, [])
@@ -554,13 +579,68 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_restores_store_and_auto_defaults_off(self):
         self.assertEqual(self.hass.static_paths[0].url, MANAGER.CARD_URL)
         self.assertEqual(self.hass.static_paths[0].path, str(MANAGER.CARD_PATH))
+        self.assertEqual(len(self.hass.static_paths), 3)
+        for path, language in zip(self.hass.static_paths[1:], ("en", "pl")):
+            self.assertEqual(path.url, MANAGER.CARD_TRANSLATION_URL.format(language=language))
+            self.assertEqual(path.path, str(MANAGER.CARD_TRANSLATION_PATH).format(language=language))
         self.assertEqual(self.hass.resources.items[0]["url"], MANAGER.CARD_RESOURCE_URL)
         self.assertEqual(self.hass.resources.operations[:2], ["load", "create"])
         self.assertFalse(self.hass.states[MANAGER.ENTITY].attributes["auto_enabled"])
+        self.assertEqual(self.hass.saved["preset_schema"], 2)
         self.hass.listeners["homeassistant_started"](None)
         self.hass.midnight_callback(None)
         await self.hass.finish_tasks()
         self.assertEqual(self.hass.services.writes, [])
+
+    async def test_semi_selling_card_plan_and_approval_are_persisted_without_writes(self):
+        put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
+        await self.call("set_selling_settings", mode="semi", threshold=.5,
+                        max_ranges=2, time_of_day="afternoon", min_soc=30)
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            self.hass.evening_callback(None)
+            await self.hass.finish_tasks()
+        selling = self.hass.states[MANAGER.ENTITY].attributes["selling"]
+        plan = selling["plans"]["2026-10-27"]
+        self.assertEqual((plan["ranges"][0]["start"], plan["ranges"][0]["end"]),
+                         ("18:00", "19:00"))
+        self.assertFalse(plan["approved"])
+        await self.call("approve_selling_plan", date="2026-10-27", approved=True)
+        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            await self.call("refresh_selling_plan", day="tomorrow")
+        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow", high_hour=17)
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            await self.call("refresh_selling_plan", day="tomorrow")
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        self.assertEqual(self.hass.services.writes, [])
+
+    async def test_automatic_selling_approves_only_after_midnight_recheck(self):
+        put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
+        put_rce_prices(self.hass, date(2026, 10, 27), "price")
+        await self.call("set_selling_settings", mode="automatic", threshold=.5,
+                        max_ranges=2, time_of_day="afternoon", min_soc=30)
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            self.hass.evening_callback(None)
+            await self.hass.finish_tasks()
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 27, 0, 0, 15)):
+            self.hass.midnight_callback(None)
+            await self.hass.finish_tasks()
+        self.assertTrue(self.hass.saved["selling"]["plans"]["2026-10-27"]["approved"])
+        self.assertEqual(self.hass.services.writes, [])
+
+    async def test_missing_rce_prices_revokes_plan_approval(self):
+        entity = put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
+        await self.call("set_selling_settings", mode="semi", threshold=.5)
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            await self.call("refresh_selling_plan", day="tomorrow")
+        self.assertIn("2026-10-27", self.hass.saved["selling"]["plans"])
+        self.hass.states[entity].attributes["prices"] = []
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            await self.call("refresh_selling_plan", day="tomorrow")
+        self.assertNotIn("2026-10-27", self.hass.saved["selling"]["plans"])
+        self.assertIn("complete 96-quarter", self.hass.saved["selling"]["error"])
 
     async def test_offline_services_persist_without_inverter_writes(self):
         preset = sample_preset()
@@ -569,12 +649,75 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         await self.call("save_current", name="Snapshot")
         await self.call("set_auto", enabled=False)
         self.assertEqual(self.hass.services.writes, [])
-        self.assertEqual(self.hass.saved["assignments"]["monday"], "Weekday")
+        weekday_id = self.hass.states[MANAGER.ENTITY].attributes["preset_ids"]["Weekday"]
+        self.assertEqual(self.hass.saved["assignments"]["monday"], weekday_id)
         restored = FakeHass(self.hass.saved)
         await MANAGER.async_setup(restored, {MANAGER.DOMAIN: {}})
         self.assertIn("Snapshot", restored.states[MANAGER.ENTITY].attributes["presets"])
+        self.assertEqual(restored.states[MANAGER.ENTITY].attributes["preset_ids"]["Weekday"], weekday_id)
         await self.call("delete", name="Weekday")
         self.assertEqual(self.hass.saved["assignments"]["monday"], "")
+
+    async def test_legacy_names_migrate_to_hash_ids_with_assignments(self):
+        saved = {
+            "presets": {"Old": sample_preset(), "Other": sample_preset()},
+            "assignments": {"monday": "Old", "tuesday": "Other"},
+            "auto_enabled": True,
+            MANAGER.CONF_WORK_MODE_ENTITY: MANAGER.LEGACY_WORK_MODE_ENTITY,
+        }
+        hass = FakeHass(saved)
+        put_live(hass, sample_preset())
+        await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {}})
+        attrs = hass.states[MANAGER.ENTITY].attributes
+        old_id = attrs["preset_ids"]["Old"]
+        self.assertRegex(old_id, r"^[0-9a-f]{64}$")
+        self.assertEqual(hass.saved["preset_schema"], 2)
+        self.assertEqual(hass.saved["presets"][old_id]["name"], "Old")
+        self.assertEqual(hass.saved["presets"][old_id]["preset"], sample_preset())
+        self.assertEqual(hass.saved["assignments"]["monday"], old_id)
+        self.assertEqual(attrs["assignments"]["monday"], "Old")
+        restored = FakeHass(hass.saved)
+        put_live(restored, sample_preset())
+        await MANAGER.async_setup(restored, {MANAGER.DOMAIN: {}})
+        self.assertEqual(restored.states[MANAGER.ENTITY].attributes["preset_ids"]["Old"], old_id)
+
+    async def test_rename_keeps_hash_and_weekday_assignment(self):
+        await self.call("save_definition", name="Old", preset=sample_preset())
+        await self.call("assign_day", day="monday", name="Old")
+        preset_id = self.hass.states[MANAGER.ENTITY].attributes["preset_ids"]["Old"]
+        changed = sample_preset()
+        changed["slots"][0]["soc"] = 75
+        await self.call("save_definition", name="Renamed", preset=changed,
+                        preset_id=preset_id, overwrite=True)
+        attrs = self.hass.states[MANAGER.ENTITY].attributes
+        self.assertEqual(attrs["preset_ids"], {"Renamed": preset_id})
+        self.assertEqual(attrs["assignments"]["monday"], "Renamed")
+        self.assertEqual(self.hass.saved["assignments"]["monday"], preset_id)
+        self.assertEqual(self.hass.saved["presets"][preset_id]["preset"]["slots"][0]["soc"], 75)
+        self.assertEqual(self.hass.services.writes, [])
+        restored = FakeHass(self.hass.saved)
+        put_live(restored, sample_preset())
+        await MANAGER.async_setup(restored, {MANAGER.DOMAIN: {}})
+        self.assertEqual(restored.states[MANAGER.ENTITY].attributes["assignments"]["monday"], "Renamed")
+        await self.call("set_auto", enabled=True)
+        with patch.object(MANAGER.asyncio, "sleep", no_delay):
+            self.hass.midnight_callback(None)
+            await self.hass.finish_tasks()
+        self.assertIn("applied Renamed", self.hass.saved["last_automatic"])
+        self.assertEqual(MANAGER.snapshot(self.hass, TEST_PREFIX)["slots"][0]["soc"], 75)
+        await self.call("delete", name="Renamed")
+        self.assertEqual(self.hass.saved["assignments"]["monday"], "")
+
+    async def test_rename_rejects_another_presets_name(self):
+        preset = sample_preset()
+        await self.call("save_definition", name="First", preset=preset)
+        await self.call("save_definition", name="Second", preset=preset)
+        first_id = self.hass.states[MANAGER.ENTITY].attributes["preset_ids"]["First"]
+        with self.assertRaises(Exception):
+            await self.call("save_definition", name="Second", preset=preset,
+                            preset_id=first_id, overwrite=True)
+        self.assertEqual(set(self.hass.states[MANAGER.ENTITY].attributes["presets"]),
+                         {"First", "Second"})
 
     async def test_weekday_assignments_and_auto_setting_restore(self):
         await self.call("save_definition", name="Target", preset=sample_preset())
@@ -633,14 +776,14 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         self.hass.listeners["homeassistant_started"](None)
         await self.hass.finish_tasks()
         self.assertEqual(self.hass.services.writes, [])
-        self.assertIn("już aktywny", self.hass.saved["last_automatic"])
+        self.assertIn("already active", self.hass.saved["last_automatic"])
 
     async def test_midnight_without_assignment_does_not_write(self):
         await self.call("set_auto", enabled=True)
         self.hass.midnight_callback(None)
         await self.hass.finish_tasks()
         self.assertEqual(self.hass.services.writes, [])
-        self.assertIn("brak presetu", self.hass.saved["last_automatic"])
+        self.assertIn("no preset", self.hass.saved["last_automatic"])
 
     async def test_midnight_applies_assigned_different_preset(self):
         target = sample_preset()
@@ -652,7 +795,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             self.hass.midnight_callback(None)
             await self.hass.finish_tasks()
         self.assertTrue(self.hass.services.writes)
-        self.assertIn("zastosowano Target", self.hass.saved["last_automatic"])
+        self.assertIn("applied Target", self.hass.saved["last_automatic"])
 
     async def test_unavailable_esphome_does_not_write(self):
         await self.call("set_auto", enabled=True)
@@ -661,7 +804,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             self.hass.listeners["homeassistant_started"](None)
             await self.hass.finish_tasks()
         self.assertEqual(self.hass.services.writes, [])
-        self.assertIn("niedostępne", self.hass.saved["last_automatic"])
+        self.assertIn("unavailable", self.hass.saved["last_automatic"])
 
     async def test_startup_waits_for_esphome_reconnection(self):
         await self.call("save_definition", name="Target", preset=sample_preset())
@@ -677,7 +820,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             self.hass.listeners["homeassistant_started"](None)
             await self.hass.finish_tasks()
         self.assertEqual(self.hass.services.writes, [])
-        self.assertIn("już aktywny", self.hass.saved["last_automatic"])
+        self.assertIn("already active", self.hass.saved["last_automatic"])
 
 
 if __name__ == "__main__":
