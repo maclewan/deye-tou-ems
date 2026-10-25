@@ -1,0 +1,29 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python -m compileall -q custom_components/deye_tou_manager
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Check card syntax
+        run: node --check custom_components/deye_tou_manager/frontend/deye-tou-manager-card.js
+      - name: Smoke test card without sensor
+        run: node tests/card-smoke.cjs

@@ -1,0 +1,81 @@
+save_current:
+  name: Save current TOU
+  description: Save a named preset from the current ESPHome readings without changing the inverter.
+  fields:
+    name:
+      name: Preset name
+      required: true
+      selector:
+        text:
+    overwrite:
+      name: Overwrite existing preset
+      selector:
+        boolean:
+save_definition:
+  name: Save preset definition
+  description: Save or edit a preset in Home Assistant without changing the inverter.
+  fields:
+    name:
+      name: Preset name
+      required: true
+      selector:
+        text:
+    preset:
+      name: Preset data
+      description: Work mode, solar sell and exactly six TOU slots.
+      required: true
+      selector:
+        object:
+    overwrite:
+      name: Overwrite existing preset
+      selector:
+        boolean:
+delete:
+  name: Delete preset
+  description: Delete a preset and clear its day assignments without changing the inverter.
+  fields:
+    name:
+      name: Preset name
+      required: true
+      selector:
+        text:
+assign_day:
+  name: Assign day
+  description: Assign a preset to a weekday, or clear the assignment with an empty name.
+  fields:
+    day:
+      name: Day
+      required: true
+      selector:
+        select:
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+    name:
+      name: Preset name
+      required: true
+      selector:
+        text:
+apply:
+  name: Apply preset to Deye
+  description: Write the selected preset to the inverter. TOU may remain off if verification fails.
+  fields:
+    name:
+      name: Preset name
+      required: true
+      selector:
+        text:
+set_auto:
+  name: Enable weekly schedule
+  description: Enable or disable automatic application on HA startup and at 00:00:15.
+  fields:
+    enabled:
+      name: Enabled
+      required: true
+      selector:
+        boolean:
