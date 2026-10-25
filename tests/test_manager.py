@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 INTEGRATION = ROOT / "custom_components" / "deye_tou_manager"
+TEST_PREFIX = "deye_inverter_esp32"
 
 
 class FakeState:
@@ -30,6 +31,24 @@ class FakeStates(dict):
 
     def async_remove(self, entity_id):
         self.pop(entity_id, None)
+
+    def async_entity_ids(self, domain=None):
+        return [entity_id for entity_id in self if domain is None or entity_id.startswith(f"{domain}.")]
+
+
+class FakeEntry:
+    def __init__(self, data=None, options=None):
+        self.data = data or {}
+        self.options = options or {}
+        self.entry_id = "test-entry"
+        self.listener = None
+
+    def add_update_listener(self, listener):
+        self.listener = listener
+        return lambda: setattr(self, "listener", None)
+
+    def async_on_unload(self, unsubscribe):
+        self.unsubscribe = unsubscribe
 
 
 class FakeStore:
@@ -119,6 +138,7 @@ class FakeHass:
     def __init__(self, saved=None, resources=None, resource_mode="storage"):
         self.saved = copy.deepcopy(saved or {})
         self.states = FakeStates()
+        self.registry_entities = {}
         self.services = FakeServices(self)
         self.resources = resources or FakeResources()
         self.data = {"lovelace": SimpleNamespace(
@@ -130,6 +150,11 @@ class FakeHass:
         self.tasks = []
         self.http = SimpleNamespace(async_register_static_paths=self.register_paths)
         self.bus = SimpleNamespace(async_listen_once=self.listen_once)
+        self.config_entries = SimpleNamespace(async_reload=self.reload_entry)
+        self.reloads = []
+
+    async def reload_entry(self, entry_id):
+        self.reloads.append(entry_id)
 
     async def register_paths(self, paths):
         self.static_paths.extend(paths)
@@ -163,6 +188,7 @@ def load_integration():
         "homeassistant.exceptions": types.ModuleType("homeassistant.exceptions"),
         "homeassistant.helpers": types.ModuleType("homeassistant.helpers"),
         "homeassistant.helpers.event": types.ModuleType("homeassistant.helpers.event"),
+        "homeassistant.helpers.entity_registry": types.ModuleType("homeassistant.helpers.entity_registry"),
         "homeassistant.helpers.storage": types.ModuleType("homeassistant.helpers.storage"),
         "homeassistant.util": types.ModuleType("homeassistant.util"),
         "homeassistant.util.dt": types.ModuleType("homeassistant.util.dt"),
@@ -180,6 +206,10 @@ def load_integration():
         hass.midnight_callback = callback
         return lambda: setattr(hass, "midnight_callback", None)
     modules["homeassistant.helpers.event"].async_track_time_change = track_time
+    modules["homeassistant.helpers.entity_registry"].async_get = lambda hass: SimpleNamespace(
+        entities=hass.registry_entities,
+        async_get=lambda entity_id: hass.registry_entities.get(entity_id),
+    )
     modules["homeassistant.helpers.storage"].Store = FakeStore
     modules["homeassistant.util"].dt = modules["homeassistant.util.dt"]
     modules["homeassistant.util.dt"].now = lambda: datetime(2026, 10, 26, 0, 0, 15)
@@ -211,7 +241,8 @@ def load_config_flow():
 
     class FakeConfigFlow:
         def __init_subclass__(cls, **kwargs):
-            cls.domain = kwargs["domain"]
+            if "domain" in kwargs:
+                cls.domain = kwargs["domain"]
 
         def async_show_form(self, **kwargs):
             return {"type": "form", **kwargs}
@@ -219,15 +250,24 @@ def load_config_flow():
         def async_create_entry(self, **kwargs):
             return {"type": "create_entry", **kwargs}
 
+        def async_abort(self, **kwargs):
+            return {"type": "abort", **kwargs}
+
     config_entries.ConfigFlow = FakeConfigFlow
+    config_entries.OptionsFlow = FakeConfigFlow
     homeassistant = types.ModuleType("homeassistant")
     homeassistant.config_entries = config_entries
+    core = types.ModuleType("homeassistant.core")
+    core.callback = lambda method: method
     voluptuous = types.ModuleType("voluptuous")
     voluptuous.Schema = lambda schema: schema
+    voluptuous.Required = lambda key, default=None: key
+    voluptuous.In = lambda values: values
     with patch.dict(sys.modules, {
         "deye_test_package": MANAGER,
         "homeassistant": homeassistant,
         "homeassistant.config_entries": config_entries,
+        "homeassistant.core": core,
         "voluptuous": voluptuous,
     }):
         spec = importlib.util.spec_from_file_location(
@@ -253,12 +293,12 @@ def sample_preset():
     }
 
 
-def put_live(hass, preset):
-    hass.states.async_set(MANAGER.eid("select", "system_work_mode"), preset["work_mode"])
-    hass.states.async_set(MANAGER.eid("switch", "solar_sell"), "on" if preset["solar_sell"] else "off")
-    hass.states.async_set(MANAGER.eid("switch", "time_of_use"), "on")
+def put_live(hass, preset, prefix=TEST_PREFIX):
+    hass.states.async_set(MANAGER.eid(prefix, "select", "system_work_mode"), preset["work_mode"])
+    hass.states.async_set(MANAGER.eid(prefix, "switch", "solar_sell"), "on" if preset["solar_sell"] else "off")
+    hass.states.async_set(MANAGER.eid(prefix, "switch", "time_of_use"), "on")
     for day in MANAGER.DAYS:
-        hass.states.async_set(MANAGER.eid("switch", f"time_of_use_{day}"), "on")
+        hass.states.async_set(MANAGER.eid(prefix, "switch", f"time_of_use_{day}"), "on")
     for index, slot in enumerate(preset["slots"], 1):
         for domain, key, value in (
             ("time", "start", slot["start"]),
@@ -267,7 +307,7 @@ def put_live(hass, preset):
             ("switch", "grid_charge", "on" if slot["grid_charge"] else "off"),
             ("switch", "gen", "on" if slot["gen"] else "off"),
         ):
-            hass.states.async_set(MANAGER.slot_id(domain, index, key), value)
+            hass.states.async_set(MANAGER.slot_id(prefix, domain, index, key), value)
 
 
 async def no_delay(_seconds):
@@ -297,22 +337,158 @@ class PresetValidationTests(unittest.TestCase):
 
 
 class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
-    async def test_user_confirms_one_click_setup(self):
+    async def test_user_selects_detected_inverter(self):
         flow = CONFIG_FLOW.DeyeTouManagerConfigFlow()
+        flow.hass = FakeHass()
+        put_live(flow.hass, sample_preset(), prefix="my_deye")
         self.assertEqual(flow.domain, MANAGER.DOMAIN)
         self.assertEqual((await flow.async_step_user())["type"], "form")
-        self.assertEqual(await flow.async_step_user({}), {
-            "type": "create_entry", "title": "Deye TOU Preset Manager", "data": {},
+        self.assertEqual(await flow.async_step_user({MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode"}), {
+            "type": "create_entry", "title": "Deye TOU Preset Manager",
+            "data": {MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode"},
+        })
+
+    async def test_no_candidate_aborts_setup(self):
+        flow = CONFIG_FLOW.DeyeTouManagerConfigFlow()
+        flow.hass = FakeHass()
+        self.assertEqual(await flow.async_step_user(), {
+            "type": "abort", "reason": "no_compatible_entities",
+        })
+
+    async def test_offline_esphome_registry_entity_is_selectable(self):
+        flow = CONFIG_FLOW.DeyeTouManagerConfigFlow()
+        flow.hass = FakeHass()
+        entity_id = "select.remote_deye_system_work_mode"
+        flow.hass.registry_entities[entity_id] = SimpleNamespace(
+            entity_id=entity_id, platform="esphome", disabled_by=None,
+        )
+        self.assertEqual(await flow.async_step_user({MANAGER.CONF_WORK_MODE_ENTITY: entity_id}), {
+            "type": "create_entry", "title": "Deye TOU Preset Manager",
+            "data": {MANAGER.CONF_WORK_MODE_ENTITY: entity_id},
+        })
+
+    async def test_options_choose_new_inverter(self):
+        entry = FakeEntry(data={MANAGER.CONF_WORK_MODE_ENTITY: "select.old_system_work_mode"})
+        flow = CONFIG_FLOW.DeyeTouManagerConfigFlow.async_get_options_flow(entry)
+        flow.config_entry = entry
+        flow.hass = FakeHass()
+        put_live(flow.hass, sample_preset(), prefix="new")
+        self.assertEqual((await flow.async_step_init())["type"], "form")
+        self.assertEqual(await flow.async_step_init({MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode"}), {
+            "type": "create_entry", "title": "",
+            "data": {MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode"},
         })
 
 
 class ResourceAndSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auto_detects_one_nondefault_inverter_for_legacy_yaml(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset(), prefix="my_deye")
+        await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {}})
+        self.assertEqual(
+            hass.states[MANAGER.ENTITY].attributes["work_mode_entity"],
+            "select.my_deye_system_work_mode",
+        )
+
+    async def test_multiple_inverters_require_explicit_selection(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset(), prefix="deye_a")
+        put_live(hass, sample_preset(), prefix="deye_b")
+        with self.assertRaisesRegex(Exception, "Multiple Work Mode"):
+            await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {}})
+        self.assertEqual(hass.services.writes, [])
+
+    async def test_yaml_can_select_one_of_multiple_inverters(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset(), prefix="deye_a")
+        put_live(hass, sample_preset(), prefix="deye_b")
+        await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_b_system_work_mode",
+        }})
+        self.assertEqual(
+            hass.states[MANAGER.ENTITY].attributes["work_mode_entity"],
+            "select.deye_b_system_work_mode",
+        )
+
+    async def test_saved_options_override_original_ui_choice(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset(), prefix="deye_a")
+        put_live(hass, sample_preset(), prefix="deye_b")
+        await MANAGER.async_setup(hass, {})
+        entry = FakeEntry(
+            data={MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_a_system_work_mode"},
+            options={MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_b_system_work_mode"},
+        )
+        await MANAGER.async_setup_entry(hass, entry)
+        self.assertEqual(
+            hass.states[MANAGER.ENTITY].attributes["work_mode_entity"],
+            "select.deye_b_system_work_mode",
+        )
+
+    async def test_target_change_disables_existing_weekly_schedule(self):
+        saved = {
+            "presets": {"Target": sample_preset()},
+            "assignments": {"monday": "Target"},
+            "auto_enabled": True,
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_a_system_work_mode",
+        }
+        hass = FakeHass(saved)
+        put_live(hass, sample_preset(), prefix="deye_a")
+        put_live(hass, sample_preset(), prefix="deye_b")
+        await MANAGER.async_setup(hass, {})
+        entry = FakeEntry(data={
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_b_system_work_mode",
+        })
+        await MANAGER.async_setup_entry(hass, entry)
+        self.assertFalse(hass.states[MANAGER.ENTITY].attributes["auto_enabled"])
+        self.assertFalse(hass.saved["auto_enabled"])
+        self.assertEqual(hass.saved["assignments"]["monday"], "Target")
+        hass.midnight_callback(None)
+        await hass.finish_tasks()
+        self.assertEqual(hass.services.writes, [])
+
+    async def test_chosen_inverter_is_only_one_written(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset(), prefix="deye_a")
+        put_live(hass, sample_preset(), prefix="deye_b")
+        await MANAGER.async_setup(hass, {})
+        entry = FakeEntry(data={
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_b_system_work_mode",
+        })
+        await MANAGER.async_setup_entry(hass, entry)
+        target = sample_preset()
+        target["slots"][0]["soc"] = 80
+        await hass.services.async_call(MANAGER.DOMAIN, "save_definition", {
+            "name": "Target", "preset": target,
+        })
+        with patch.object(MANAGER.asyncio, "sleep", no_delay):
+            await hass.services.async_call(MANAGER.DOMAIN, "apply", {"name": "Target"})
+        self.assertTrue(hass.services.writes)
+        self.assertTrue(all(
+            entity_id.startswith(("select.deye_b_", "switch.deye_b_", "number.deye_b_", "time.deye_b_"))
+            for _, _, data in hass.services.writes
+            for entity_id in ([data["entity_id"]] if isinstance(data["entity_id"], str) else data["entity_id"])
+        ))
+        self.assertEqual(
+            hass.states[MANAGER.eid("deye_a", "number", "time_of_use_1_soc")].state,
+            "20",
+        )
+
+    async def test_options_change_triggers_reload(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset())
+        await MANAGER.async_setup(hass, {})
+        entry = FakeEntry(data={MANAGER.CONF_WORK_MODE_ENTITY: MANAGER.LEGACY_WORK_MODE_ENTITY})
+        await MANAGER.async_setup_entry(hass, entry)
+        await entry.listener(hass, entry)
+        self.assertEqual(hass.reloads, [entry.entry_id])
+
     async def test_ui_entry_starts_and_unloads_without_yaml(self):
         hass = FakeHass()
         await MANAGER.async_setup(hass, {})
         self.assertNotIn(MANAGER.ENTITY, hass.states)
         self.assertEqual(hass.resources.items, [])
-        entry = SimpleNamespace()
+        entry = FakeEntry()
         self.assertTrue(await MANAGER.async_setup_entry(hass, entry))
         self.assertIn(MANAGER.ENTITY, hass.states)
         self.assertEqual(len(hass.resources.items), 1)
@@ -360,7 +536,7 @@ class ResourceAndSetupTests(unittest.IsolatedAsyncioTestCase):
     async def test_ui_entry_does_not_stop_yaml_installation(self):
         hass = FakeHass()
         await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {}})
-        entry = SimpleNamespace()
+        entry = FakeEntry()
         await MANAGER.async_setup_entry(hass, entry)
         self.assertTrue(await MANAGER.async_unload_entry(hass, entry))
         self.assertIn(MANAGER.ENTITY, hass.states)
@@ -413,7 +589,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_control_prevents_all_writes(self):
         await self.call("save_definition", name="Target", preset=sample_preset())
-        del self.hass.states[MANAGER.eid("switch", "time_of_use_sunday")]
+        del self.hass.states[MANAGER.eid(TEST_PREFIX, "switch", "time_of_use_sunday")]
         with self.assertRaises(Exception):
             await self.call("apply", name="Target")
         self.assertEqual(self.hass.services.writes, [])
@@ -425,30 +601,30 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(MANAGER.asyncio, "sleep", no_delay):
             await self.call("apply", name="Target")
         writes = self.hass.services.writes
-        main = MANAGER.eid("switch", "time_of_use")
+        main = MANAGER.eid(TEST_PREFIX, "switch", "time_of_use")
         self.assertEqual(writes[0][:2], ("switch", "turn_off"))
         self.assertEqual(writes[0][2]["entity_id"], main)
         self.assertEqual(writes[-1][:2], ("switch", "turn_on"))
         self.assertEqual(writes[-1][2]["entity_id"], main)
-        self.assertEqual(MANAGER.snapshot(self.hass), MANAGER.validate_preset(target))
+        self.assertEqual(MANAGER.snapshot(self.hass, TEST_PREFIX), MANAGER.validate_preset(target))
 
     async def test_write_failure_leaves_tou_off(self):
         await self.call("save_definition", name="Target", preset=sample_preset())
-        self.hass.services.fail_entity = MANAGER.slot_id("number", 2, "soc")
+        self.hass.services.fail_entity = MANAGER.slot_id(TEST_PREFIX, "number", 2, "soc")
         with patch.object(MANAGER.asyncio, "sleep", no_delay):
             with self.assertRaises(RuntimeError):
                 await self.call("apply", name="Target")
-        self.assertEqual(self.hass.states[MANAGER.eid("switch", "time_of_use")].state, "off")
+        self.assertEqual(self.hass.states[MANAGER.eid(TEST_PREFIX, "switch", "time_of_use")].state, "off")
 
     async def test_readback_mismatch_leaves_tou_off(self):
         target = sample_preset()
         target["slots"][0]["soc"] = 80
         await self.call("save_definition", name="Target", preset=target)
-        self.hass.services.ignore_entity = MANAGER.slot_id("number", 1, "soc")
+        self.hass.services.ignore_entity = MANAGER.slot_id(TEST_PREFIX, "number", 1, "soc")
         with patch.object(MANAGER.asyncio, "sleep", no_delay):
             with self.assertRaises(Exception):
                 await self.call("apply", name="Target")
-        self.assertEqual(self.hass.states[MANAGER.eid("switch", "time_of_use")].state, "off")
+        self.assertEqual(self.hass.states[MANAGER.eid(TEST_PREFIX, "switch", "time_of_use")].state, "off")
 
     async def test_startup_skips_matching_preset(self):
         await self.call("save_definition", name="Target", preset=sample_preset())
@@ -480,7 +656,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unavailable_esphome_does_not_write(self):
         await self.call("set_auto", enabled=True)
-        del self.hass.states[MANAGER.slot_id("number", 1, "soc")]
+        del self.hass.states[MANAGER.slot_id(TEST_PREFIX, "number", 1, "soc")]
         with patch.object(MANAGER.asyncio, "sleep", no_delay):
             self.hass.listeners["homeassistant_started"](None)
             await self.hass.finish_tasks()
@@ -491,7 +667,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         await self.call("save_definition", name="Target", preset=sample_preset())
         await self.call("assign_day", day="monday", name="Target")
         await self.call("set_auto", enabled=True)
-        missing = MANAGER.slot_id("number", 1, "soc")
+        missing = MANAGER.slot_id(TEST_PREFIX, "number", 1, "soc")
         del self.hass.states[missing]
 
         async def reconnect(_seconds):

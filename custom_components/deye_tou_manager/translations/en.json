@@ -3,8 +3,33 @@
     "step": {
       "user": {
         "title": "Set up Deye TOU Preset Manager",
-        "description": "Use the existing Deye ESPHome entities to manage Time of Use presets. No inverter settings are changed during setup."
+        "description": "Choose the Lewa-Reka ESPHome inverter's Work Mode entity. The other TOU controls will use the same entity prefix. Setup does not change inverter settings.",
+        "data": {
+          "work_mode_entity": "Inverter Work Mode entity"
+        }
       }
+    },
+    "error": {
+      "invalid_entity": "Choose one of the detected Work Mode entities."
+    },
+    "abort": {
+      "no_compatible_entities": "No compatible Work Mode entity was found. Set up the Lewa-Reka ESPHome inverter first, then try again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Select Deye inverter",
+        "data": {
+          "work_mode_entity": "Inverter Work Mode entity"
+        }
+      }
+    },
+    "error": {
+      "invalid_entity": "Choose one of the detected Work Mode entities."
+    },
+    "abort": {
+      "no_compatible_entities": "No compatible Work Mode entity was found."
     }
   }
 }

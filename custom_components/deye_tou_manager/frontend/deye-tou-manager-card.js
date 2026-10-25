@@ -7,17 +7,25 @@ class DeyeTouManagerCard extends HTMLElement {
     this._selected = "";
     this._busy = false;
     this._editor = null;
+    this._editorDraft = false;
   }
   setConfig(config) { this.config = config || {}; }
-  getCardSize() { return 8; }
+  getCardSize() { return 14; }
   static getStubConfig() { return { type: "custom:deye-tou-manager-card" }; }
   set hass(value) {
     this._hass = value;
     const state = value?.states["sensor.deye_tou_preset_manager"];
     const signature = state ? JSON.stringify(state.attributes) : "missing";
+    const live = this.liveSnapshot(value, state?.attributes?.work_mode_entity);
+    const liveSignature = JSON.stringify(live);
     if (signature !== this._lastSignature) {
       this._lastSignature = signature;
+      this._lastLiveSignature = liveSignature;
       this.render();
+    } else if (liveSignature !== this._lastLiveSignature) {
+      this._lastLiveSignature = liveSignature;
+      const summary = this.shadowRoot.getElementById("live-summary");
+      if (summary) summary.innerHTML = this.liveSummaryHtml(live);
     }
   }
   escape(s) {
@@ -52,6 +60,40 @@ class DeyeTouManagerCard extends HTMLElement {
       }))
     };
   }
+  liveSnapshot(hass, workModeEntity) {
+    const suffix = "_system_work_mode";
+    if (typeof workModeEntity !== "string" || !workModeEntity.startsWith("select.") ||
+        !workModeEntity.endsWith(suffix)) return null;
+    const prefix = workModeEntity.slice("select.".length, -suffix.length);
+    if (!prefix) return null;
+    const read = (domain, name) => hass?.states[`${domain}.${prefix}_${name}`]?.state ?? null;
+    return {
+      workMode: hass?.states[workModeEntity]?.state ?? null,
+      solarSell: read("switch", "solar_sell"),
+      tou: read("switch", "time_of_use"),
+      slots: Array.from({length:6}, (_, i) => {
+        const n = i + 1;
+        return {
+          start: read("time", `time_of_use_${n}_start`),
+          soc: read("number", `time_of_use_${n}_soc`),
+          power: read("number", `time_of_use_${n}_out_power`),
+          grid: read("switch", `time_of_use_${n}_grid_charge`),
+          gen: read("switch", `time_of_use_${n}_gen`),
+        };
+      }),
+    };
+  }
+  liveSummaryHtml(live) {
+    if (!live) return '<p class="muted">Nie wybrano encji Work Mode falownika.</p>';
+    const show = value => value == null || value === "unavailable" || value === "unknown"
+      ? "—" : this.escape(value);
+    const withUnit = (value, unit) => show(value) === "—" ? "—" : `${show(value)} ${unit}`;
+    const flag = value => value === "on" ? "Tak" : value === "off" ? "Nie" : "—";
+    return `<div class="chips">${live.slots.map((slot, i) =>
+      `<span class="chip"><b>${i + 1}</b> ${show(slot.start).slice(0, 5)} · ${withUnit(slot.soc, "%")} · ${withUnit(slot.power, "W")}<br>Grid: ${flag(slot.grid)} · Gen: ${flag(slot.gen)}</span>`
+    ).join("")}</div>
+      <p class="muted">Work Mode: ${show(live.workMode)} · Solar Sell: ${flag(live.solarSell)} · TOU: ${flag(live.tou)}</p>`;
+  }
   editorHtml() {
     const e = this._editor;
     if (!e) return "";
@@ -59,7 +101,7 @@ class DeyeTouManagerCard extends HTMLElement {
     const modes = ["Zero Export To CT","Zero Export To Load","Selling First"];
     return `<div class="editor">
       <div class="row title-row"><h3>${e.originalName ? "Edytuj preset" : "Nowy preset"}</h3>
-        <button id="cancel-editor">Zamknij</button></div>
+        <button id="reset-editor">Resetuj zmiany</button></div>
       <div class="row"><label>Nazwa</label><input class="grow" id="editor-name" maxlength="64" value="${this.escape(e.name)}" ${e.originalName ? "readonly" : ""}></div>
       <div class="row top-settings"><label>Work Mode</label><select id="editor-mode" class="grow">${modes.map(m=>
         `<option value="${this.escape(m)}" ${p.work_mode===m?"selected":""}>${this.escape(m)}</option>`).join("")}</select>
@@ -75,10 +117,11 @@ class DeyeTouManagerCard extends HTMLElement {
       <p class="muted">Zmiany są tylko w tym formularzu. Zapis nie zmienia falownika.</p>
       ${p.work_mode === "Selling First" ? '<p class="warning">Selling First z TOU może umożliwić sprzedaż energii z baterii. Sprawdź ten tryb przed wczytaniem lub włączeniem automatyki.</p>' : ""}
       <div class="row"><button class="primary" id="save-editor">Zapisz preset w HA</button>
-        <button id="cancel-editor2">Anuluj</button></div>
+        </div>
     </div>`;
   }
   startEditor(type, presets) {
+    this._editorDraft = type !== "edit";
     if (type === "new") this._editor = { name:"", originalName:null, preset:this.blank() };
     if (type === "copy") this._editor = {
       name: this._selected + " - kopia", originalName:null,
@@ -106,7 +149,9 @@ class DeyeTouManagerCard extends HTMLElement {
         name, preset:e.preset, overwrite:Boolean(e.originalName)
       });
       this._selected = name;
-      this._editor = null;
+      this._pendingSavedName = name;
+      this._editor = {name, originalName:name, preset:structuredClone(e.preset)};
+      this._editorDraft = false;
       this.render();
       this.status("Preset zapisany w HA. Falownik bez zmian.",false);
     } catch (err) { this.status("Błąd zapisu: "+(err?.message||err),true); }
@@ -116,14 +161,20 @@ class DeyeTouManagerCard extends HTMLElement {
     const data = this._hass?.states["sensor.deye_tou_preset_manager"]?.attributes;
     const presets = data?.presets || {};
     const names = Object.keys(presets).sort((a,b)=>a.localeCompare(b,"pl"));
-    if (!names.includes(this._selected)) this._selected = names[0] || "";
+    if (names.includes(this._pendingSavedName)) this._pendingSavedName = null;
+    if (!names.includes(this._selected) && this._selected !== this._pendingSavedName)
+      this._selected = names[0] || "";
     const selected = presets[this._selected];
+    if (data && (!this._editor ||
+        (!this._editorDraft && this._selected !== this._pendingSavedName &&
+          this._editor.originalName !== (selected ? this._selected : null)))) {
+      this._editor = selected
+        ? { name:this._selected, originalName:this._selected, preset:structuredClone(selected) }
+        : { name:"", originalName:null, preset:this.blank() };
+    }
     const days = { monday:"Poniedziałek", tuesday:"Wtorek", wednesday:"Środa",
       thursday:"Czwartek", friday:"Piątek", saturday:"Sobota", sunday:"Niedziela" };
     const options = names.map(n => `<option value="${this.escape(n)}" ${n === this._selected ? "selected" : ""}>${this.escape(n)}</option>`).join("");
-    const summary = selected ? `<div class="chips">${selected.slots.map((s,i)=>
-      `<span class="chip"><b>${i+1}</b> ${this.escape(s.start.slice(0,5))} · ${s.soc}% ${s.grid_charge ? "⚡" : ""}</span>`).join("")}</div>` :
-      `<p class="muted">Brak presetów. Wpisz nazwę i zapisz aktualne TOU z falownika.</p>`;
     this.shadowRoot.innerHTML = `
       <style>
         :host{display:block;color:var(--primary-text-color)}
@@ -146,7 +197,7 @@ class DeyeTouManagerCard extends HTMLElement {
         .slot-table input[type=time]{width:100px;min-height:34px;padding:5px}
         .slot-table input[type=checkbox]{width:18px;height:18px;min-height:auto;accent-color:var(--primary-color)}
         .chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:14px 0}
-        .chip{font-size:12px;padding:10px 8px;border-radius:8px;background:var(--secondary-background-color);white-space:nowrap;text-align:center}
+        .chip{font-size:12px;padding:10px 8px;border-radius:8px;background:var(--secondary-background-color);line-height:1.5;text-align:center}
         .chip b{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;width:18px;height:18px;background:var(--primary-color);color:white;margin-right:2px}
         .days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
         .day{display:flex;align-items:center;gap:9px}.day label{min-width:88px;font-size:13px}.day select{flex:1;min-width:0}
@@ -159,22 +210,22 @@ class DeyeTouManagerCard extends HTMLElement {
       <ha-card>
         <h2>Presety Deye TOU</h2><p class="muted">Zarządzaj harmonogramami i przypisz je do dni tygodnia.</p>
         ${!data ? `<p class="muted">Nie znaleziono sensor.deye_tou_preset_manager. Sprawdź instalację.</p>` : `
+        <h3>Aktualne ustawienia falownika</h3>
+        <div id="live-summary">${this.liveSummaryHtml(this.liveSnapshot(this._hass, data.work_mode_entity))}</div>
+        <div class="rule"></div>
         <h3>Biblioteka presetów (${names.length})</h3>
         <div class="row"><select class="grow" id="selected" ${names.length ? "" : "disabled"}>
           ${options || '<option>Brak presetów</option>'}</select>
           <button id="apply" ${selected ? "" : "disabled"}>▶ Wczytaj do Deye</button></div>
-        ${summary}
-        <div class="row"><button id="edit" ${selected ? "" : "disabled"}>✎ Edytuj</button>
-          <button id="copy" ${selected ? "" : "disabled"}>⧉ Duplikuj</button>
+        <div class="row"><button id="copy" ${selected ? "" : "disabled"}>⧉ Duplikuj</button>
           <button id="replace" ${selected ? "" : "disabled"}>↻ Aktualizuj z falownika</button>
           <button class="danger" id="delete" ${selected ? "" : "disabled"}>Usuń preset</button></div>
+        ${this.editorHtml()}
         <div class="rule"></div>
-        <h3>Nowy preset</h3>
         <div class="row"><button id="newblank">+ Nowy pusty preset</button>
           <input class="grow" id="newname" maxlength="64" placeholder="Nazwa snapshotu z falownika" />
           <button class="primary" id="create">+ Zapisz aktualne TOU</button></div>
         <p class="muted">Odczytuje 6 slotów, SOC, moc, Grid Charge, Gen, Work Mode i Solar Sell.</p>
-        ${this.editorHtml()}
         <div class="rule"></div>
         <h3>Przypisanie do dni tygodnia</h3>
         <div class="days">${Object.entries(days).map(([key,label])=>
@@ -190,8 +241,7 @@ class DeyeTouManagerCard extends HTMLElement {
         <div id="status" role="status"></div>
       </ha-card>`;
     const $ = id => this.shadowRoot.getElementById(id);
-    $("selected")?.addEventListener("change", e=>{this._selected=e.target.value;this.render()});
-    $("edit")?.addEventListener("click",()=>this.startEditor("edit",presets));
+    $("selected")?.addEventListener("change", e=>{this._selected=e.target.value;this.startEditor("edit",presets)});
     $("copy")?.addEventListener("click",()=>this.startEditor("copy",presets));
     $("newblank")?.addEventListener("click",()=>this.startEditor("new",presets));
     $("create")?.addEventListener("click",()=>{
@@ -222,13 +272,17 @@ class DeyeTouManagerCard extends HTMLElement {
       }
       this.act("set_auto",{enabled});
     });
-    $("cancel-editor")?.addEventListener("click",()=>{this._editor=null;this.render()});
-    $("cancel-editor2")?.addEventListener("click",()=>{this._editor=null;this.render()});
+    $("reset-editor")?.addEventListener("click",()=>{
+      this._editor=null;
+      this._editorDraft=false;
+      this.render();
+    });
     $("save-editor")?.addEventListener("click",()=>this.saveEditor());
-    $("editor-name")?.addEventListener("input",e=>{this._editor.name=e.target.value});
-    $("editor-mode")?.addEventListener("change",e=>{this._editor.preset.work_mode=e.target.value;this.render()});
-    $("editor-solar")?.addEventListener("change",e=>{this._editor.preset.solar_sell=e.target.checked});
+    $("editor-name")?.addEventListener("input",e=>{this._editorDraft=true;this._editor.name=e.target.value});
+    $("editor-mode")?.addEventListener("change",e=>{this._editorDraft=true;this._editor.preset.work_mode=e.target.value;this.render()});
+    $("editor-solar")?.addEventListener("change",e=>{this._editorDraft=true;this._editor.preset.solar_sell=e.target.checked});
     this.shadowRoot.querySelectorAll("[data-idx]").forEach(el=>el.addEventListener("change",e=>{
+      this._editorDraft=true;
       const target=e.target, slot=this._editor.preset.slots[Number(target.dataset.idx)];
       const field=target.dataset.field;
       if (target.type==="checkbox") slot[field]=target.checked;
