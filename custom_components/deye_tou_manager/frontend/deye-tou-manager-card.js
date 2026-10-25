@@ -83,14 +83,30 @@ class DeyeTouManagerCard extends HTMLElement {
       }),
     };
   }
+  timeLabel(value) {
+    return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)
+      ? value.slice(0, 5) : "—";
+  }
+  endTimeLabel(slots, index) {
+    const end = this.timeLabel(slots[(index + 1) % slots.length]?.start);
+    return end === "—" ? end : `${end}${index === slots.length - 1 ? " (nast. dzień)" : ""}`;
+  }
+  refreshEditorEndTimes() {
+    this.shadowRoot.querySelectorAll("[data-end-idx]").forEach(el => {
+      el.textContent = this.endTimeLabel(this._editor.preset.slots, Number(el.dataset.endIdx));
+    });
+  }
   liveSummaryHtml(live) {
     if (!live) return '<p class="muted">Nie wybrano encji Work Mode falownika.</p>';
     const show = value => value == null || value === "unavailable" || value === "unknown"
       ? "—" : this.escape(value);
     const withUnit = (value, unit) => show(value) === "—" ? "—" : `${show(value)} ${unit}`;
     const flag = value => value === "on" ? "Tak" : value === "off" ? "Nie" : "—";
-    return `<div class="chips">${live.slots.map((slot, i) =>
-      `<span class="chip"><b>${i + 1}</b> ${show(slot.start).slice(0, 5)} · ${withUnit(slot.soc, "%")} · ${withUnit(slot.power, "W")}<br>Grid: ${flag(slot.grid)} · Gen: ${flag(slot.gen)}</span>`
+    return `<div class="live-slots">${live.slots.map((slot, i) =>
+      `<div class="live-slot"><b class="live-index">${i + 1}</b><div>
+        <div class="live-time">${this.timeLabel(slot.start)} – ${this.endTimeLabel(live.slots, i)}</div>
+        <div class="live-details">SOC: ${withUnit(slot.soc, "%")} · Moc: ${withUnit(slot.power, "W")} · Grid: ${flag(slot.grid)} · Gen: ${flag(slot.gen)}</div>
+      </div></div>`
     ).join("")}</div>
       <p class="muted">Work Mode: ${show(live.workMode)} · Solar Sell: ${flag(live.solarSell)} · TOU: ${flag(live.tou)}</p>`;
   }
@@ -106,9 +122,10 @@ class DeyeTouManagerCard extends HTMLElement {
       <div class="row top-settings"><label>Work Mode</label><select id="editor-mode" class="grow">${modes.map(m=>
         `<option value="${this.escape(m)}" ${p.work_mode===m?"selected":""}>${this.escape(m)}</option>`).join("")}</select>
         <label class="check"><input type="checkbox" id="editor-solar" ${p.solar_sell?"checked":""}>Solar Sell</label></div>
-      <div class="slot-scroll"><table class="slot-table"><thead><tr><th>Slot</th><th>Od</th><th>SOC %</th><th>Moc W</th><th>Grid</th><th>Gen</th></tr></thead>
+      <div class="slot-scroll"><table class="slot-table"><thead><tr><th>Slot</th><th>Od</th><th>Do</th><th>SOC %</th><th>Moc W</th><th>Grid</th><th>Gen</th></tr></thead>
         <tbody>${p.slots.map((s,i)=>`<tr><td>${i+1}</td>
           <td><input type="time" step="60" data-idx="${i}" data-field="start" value="${this.escape(s.start.slice(0,5))}"></td>
+          <td class="slot-end" data-end-idx="${i}">${this.endTimeLabel(p.slots, i)}</td>
           <td><input type="number" min="0" max="100" step="1" data-idx="${i}" data-field="soc" value="${s.soc}"></td>
           <td><input type="number" min="0" max="12000" step="100" data-idx="${i}" data-field="power" value="${s.power}"></td>
           <td><input type="checkbox" data-idx="${i}" data-field="grid_charge" ${s.grid_charge?"checked":""}></td>
@@ -195,17 +212,18 @@ class DeyeTouManagerCard extends HTMLElement {
         .slot-table th,.slot-table td{padding:6px 4px;text-align:center;border-bottom:1px solid var(--divider-color);font-size:12px}
         .slot-table input[type=number]{width:85px;min-height:34px;padding:5px}
         .slot-table input[type=time]{width:100px;min-height:34px;padding:5px}
-        .slot-table input[type=checkbox]{width:18px;height:18px;min-height:auto;accent-color:var(--primary-color)}
-        .chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:14px 0}
-        .chip{font-size:12px;padding:10px 8px;border-radius:8px;background:var(--secondary-background-color);line-height:1.5;text-align:center}
-        .chip b{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;width:18px;height:18px;background:var(--primary-color);color:white;margin-right:2px}
+        .slot-end{color:var(--secondary-text-color);white-space:nowrap;min-width:70px}
+        .live-slots{display:grid;grid-template-columns:1fr;gap:6px;margin:14px 0}
+        .live-slot{display:flex;align-items:flex-start;gap:10px;padding:9px 11px;border-radius:8px;background:var(--secondary-background-color);font-size:12px}
+        .live-index{display:inline-flex;flex:none;align-items:center;justify-content:center;border-radius:50%;width:20px;height:20px;background:var(--primary-color);color:white}
+        .live-time{font-weight:600;font-size:13px}.live-details{color:var(--secondary-text-color);line-height:1.5;margin-top:2px}
         .days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
         .day{display:flex;align-items:center;gap:9px}.day label{min-width:88px;font-size:13px}.day select{flex:1;min-width:0}
         .automode{display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--secondary-background-color);border-radius:10px;padding:13px;margin:12px 0}
         .automode label{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px}
         .automode input{width:20px;height:20px;min-height:auto;accent-color:var(--primary-color)}
         #status{font-size:12px;color:var(--success-color);min-height:18px;margin-top:10px}#status.error{color:var(--error-color)}
-        @media(max-width:580px){ha-card{padding:15px}.days{grid-template-columns:1fr}.chips{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        @media(max-width:580px){ha-card{padding:15px}.days{grid-template-columns:1fr}}
       </style>
       <ha-card>
         <h2>Presety Deye TOU</h2><p class="muted">Zarządzaj harmonogramami i przypisz je do dni tygodnia.</p>
@@ -281,14 +299,21 @@ class DeyeTouManagerCard extends HTMLElement {
     $("editor-name")?.addEventListener("input",e=>{this._editorDraft=true;this._editor.name=e.target.value});
     $("editor-mode")?.addEventListener("change",e=>{this._editorDraft=true;this._editor.preset.work_mode=e.target.value;this.render()});
     $("editor-solar")?.addEventListener("change",e=>{this._editorDraft=true;this._editor.preset.solar_sell=e.target.checked});
-    this.shadowRoot.querySelectorAll("[data-idx]").forEach(el=>el.addEventListener("change",e=>{
-      this._editorDraft=true;
-      const target=e.target, slot=this._editor.preset.slots[Number(target.dataset.idx)];
-      const field=target.dataset.field;
-      if (target.type==="checkbox") slot[field]=target.checked;
-      else if (target.type==="number") slot[field]=Number(target.value);
-      else slot[field]=target.value+":00";
-    }));
+    this.shadowRoot.querySelectorAll("[data-idx]").forEach(el=>{
+      const update = e => {
+        this._editorDraft=true;
+        const target=e.target, slot=this._editor.preset.slots[Number(target.dataset.idx)];
+        const field=target.dataset.field;
+        if (target.type==="checkbox") slot[field]=target.checked;
+        else if (target.type==="number") slot[field]=Number(target.value);
+        else {
+          slot[field]=target.value+":00";
+          this.refreshEditorEndTimes();
+        }
+      };
+      el.addEventListener("change", update);
+      if (el.type === "time") el.addEventListener("input", update);
+    });
   }
 }
 if (!customElements.get("deye-tou-manager-card"))

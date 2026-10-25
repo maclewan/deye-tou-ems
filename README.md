@@ -78,7 +78,7 @@ After UI setup or a YAML configuration check and restart, `sensor.deye_tou_prese
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for this card at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.3
+/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.4
 ```
 
 If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
@@ -93,7 +93,7 @@ After a card update, refresh the browser. Storage-mode resource URLs are updated
 
 ## Usage
 
-The compact section at the top shows the inverter's **live** Work Mode, Solar Sell, TOU, and six slot readings; it is read-only. Selecting a saved preset opens its full editor by default. Edit it offline, duplicate it, start a blank preset, or capture the inverter's current values as a new preset. Assign presets to weekdays and use **Wczytaj do Deye** to apply one manually. Turn on **Włącz harmonogram tygodniowy** only after checking the assignments. The card shows the latest automatic result.
+The compact section at the top shows the inverter's **live** Work Mode, Solar Sell, TOU, and six slot readings in a single vertical list; it is read-only. Each slot shows its start and calculated end time. The editor also shows a read-only end-time column that updates when you change a start time. A slot ends when the next one starts; the sixth ends at the first slot's start on the next day. Selecting a saved preset opens its full editor by default. Edit it offline, duplicate it, start a blank preset, or capture the inverter's current values as a new preset. Assign presets to weekdays and use **Wczytaj do Deye** to apply one manually. Turn on **Włącz harmonogram tygodniowy** only after checking the assignments. The card shows the latest automatic result.
 
 The integration also registers these Home Assistant actions:
 
@@ -120,7 +120,7 @@ The schedule uses Home Assistant local time. Manual and scheduled applies share 
 
 1. Back up `/config/.storage/deye_tou_manager`.
 2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
-3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.3` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for this card.
+3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.4` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for this card.
 4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
 
 The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged, so saved presets need no migration. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.

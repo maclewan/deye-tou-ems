@@ -58,17 +58,41 @@ card.hass = { states: {
 assert.match(card.shadowRoot.innerHTML, /Aktualne ustawienia falownika/);
 assert.match(card.shadowRoot.innerHTML, /37 %/);
 assert.match(card.shadowRoot.innerHTML, /6000 W/);
+assert.match(card.shadowRoot.innerHTML, /\.live-slots\{display:grid;grid-template-columns:1fr/);
+assert.equal([...card.shadowRoot.innerHTML.matchAll(/class="live-slot"/g)].length, 6);
+assert.match(card.shadowRoot.innerHTML, /00:00 – 04:00/);
+assert.match(card.shadowRoot.innerHTML, /20:00 – 00:00 \(nast\. dzień\)/);
 assert.match(card.shadowRoot.innerHTML, /Edytuj preset/);
 assert.match(card.shadowRoot.innerHTML, /value="25"/);
+assert.match(card.shadowRoot.innerHTML, /<th>Od<\/th><th>Do<\/th>/);
+assert.match(card.shadowRoot.innerHTML, /data-end-idx="0">04:00<\/td>/);
+assert.match(card.shadowRoot.innerHTML, /data-end-idx="5">00:00 \(nast\. dzień\)<\/td>/);
 assert.doesNotMatch(card.shadowRoot.innerHTML, /⚡/);
 const originalHtml = card.shadowRoot.innerHTML;
 const liveSummary = { innerHTML: "" };
 card.shadowRoot.getElementById = id => id === "live-summary" ? liveSummary : null;
 card.hass = { states: {
   ...liveStates,
+  "time.my_deye_time_of_use_2_start": { state: "05:00:00" },
   "number.my_deye_time_of_use_1_soc": { state: "42" },
   "sensor.deye_tou_preset_manager": { attributes },
 } };
 assert.match(liveSummary.innerHTML, /42 %/);
+assert.match(liveSummary.innerHTML, /00:00 – 05:00/);
 assert.equal(card.shadowRoot.innerHTML, originalHtml, "live updates do not discard editor inputs");
+const firstEnd = { dataset: { endIdx: "0" }, textContent: "" };
+const lastEnd = { dataset: { endIdx: "5" }, textContent: "" };
+const timeInput = {
+  type: "time", dataset: { idx: "1", field: "start" }, value: "05:00", listeners: {},
+  addEventListener(name, callback) { this.listeners[name] = callback; },
+};
+card.shadowRoot.querySelectorAll = selector => ({
+  "[data-idx]": [timeInput], "[data-end-idx]": [firstEnd, lastEnd],
+}[selector] || []);
+card.render();
+timeInput.listeners.input({ target: timeInput });
+assert.equal(card._editor.preset.slots[1].start, "05:00:00");
+assert.equal(firstEnd.textContent, "05:00");
+assert.equal(lastEnd.textContent, "00:00 (nast. dzień)");
+assert.equal(card.timeLabel("unavailable"), "—");
 assert.equal(window.customCards.length, 1);
