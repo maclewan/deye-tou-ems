@@ -6,10 +6,13 @@ import copy
 import logging
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import voluptuous as vol
 
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace import LOVELACE_DATA
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -25,7 +28,63 @@ PREFIX = "deye_inverter_esp32"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
+CARD_VERSION = "0.4.0"
+CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
+OLD_CARD_URL = "/local/deye-tou-manager-card.js"
+
+
+def _card_resource_path(url: object) -> str | None:
+    """Recognize only this card's local resource URLs."""
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme or parts.netloc:
+        return None
+    return parts.path if parts.path in (OLD_CARD_URL, CARD_URL) else None
+
+
+async def async_register_dashboard_resource(hass: HomeAssistant) -> None:
+    """Install or migrate this card's storage-mode Lovelace resource."""
+    lovelace = hass.data.get(LOVELACE_DATA)
+    if lovelace is None:
+        _LOGGER.warning("Lovelace is not ready; add the Deye TOU card resource manually")
+        return
+    if getattr(lovelace, "resource_mode", None) != "storage":
+        _LOGGER.info("Lovelace resources use YAML; configure the Deye TOU card URL in YAML")
+        return
+
+    try:
+        resources = lovelace.resources
+        # Lovelace resource storage may be lazy-loaded at startup. Inspecting
+        # or creating items before loading can overwrite unrelated resources.
+        await resources.async_get_info()
+        if not resources.loaded:
+            raise HomeAssistantError("Lovelace resources were not loaded")
+
+        matches = [
+            item for item in resources.async_items()
+            if _card_resource_path(item.get("url")) is not None
+        ]
+        keep = next(
+            (item for item in matches if _card_resource_path(item["url"]) == CARD_URL),
+            matches[0] if matches else None,
+        )
+        if keep is None:
+            await resources.async_create_item({"url": CARD_RESOURCE_URL, "res_type": "module"})
+        else:
+            if keep["url"] != CARD_RESOURCE_URL or keep.get("type") != "module":
+                await resources.async_update_item(
+                    keep["id"], {"url": CARD_RESOURCE_URL, "res_type": "module"}
+                )
+            for item in matches:
+                if item is not keep:
+                    await resources.async_delete_item(item["id"])
+    except Exception:
+        _LOGGER.exception("Could not register the Deye TOU card; check dashboard resources")
 
 
 def eid(kind: str, suffix: str) -> str:
@@ -88,9 +147,40 @@ def control_states(hass: HomeAssistant) -> tuple[bool, bool]:
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register the card and start legacy YAML installations."""
     await hass.http.async_register_static_paths([
         StaticPathConfig(CARD_URL, str(CARD_PATH), cache_headers=False),
     ])
+    if DOMAIN in config:
+        await _async_start_manager(hass, yaml_configured=True)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Start a UI-configured installation without requiring YAML."""
+    if DOMAIN not in hass.data:
+        await _async_start_manager(hass, yaml_configured=False)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Stop a UI installation while retaining any active YAML installation."""
+    runtime = hass.data.get(DOMAIN)
+    if runtime is None or runtime["yaml_configured"]:
+        return True
+    runtime["active"] = False
+    runtime["unsub_time"]()
+    runtime["unsub_start"]()
+    for service in ("save_current", "save_definition", "delete", "assign_day", "apply", "set_auto"):
+        hass.services.async_remove(DOMAIN, service)
+    hass.states.async_remove(ENTITY)
+    hass.data.pop(DOMAIN)
+    return True
+
+
+async def _async_start_manager(hass: HomeAssistant, *, yaml_configured: bool) -> None:
+    """Initialize the one shared manager for YAML or UI configuration."""
+    await async_register_dashboard_resource(hass)
     store = Store(hass, 1, DOMAIN)
     saved = await store.async_load() or {}
     presets = saved.get("presets", {})
@@ -98,6 +188,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     auto_enabled = bool(saved.get("auto_enabled", False))
     last_automatic = saved.get("last_automatic", "Nie uruchamiano")
     lock = asyncio.Lock()
+    runtime = {"active": True, "yaml_configured": yaml_configured}
 
     def publish() -> None:
         hass.states.async_set(ENTITY, str(len(presets)), {
@@ -230,12 +321,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async def run_scheduled(reason: str) -> None:
         """Apply today's assignment after ESPHome reconnects, if enabled."""
         nonlocal last_automatic
-        if not auto_enabled:
+        if not runtime["active"] or not auto_enabled:
             return
         # ESPHome may report unavailable immediately after Home Assistant starts.
         # Do not write anything until a complete snapshot can be read.
         for _ in range(36):
-            if not auto_enabled:
+            if not runtime["active"] or not auto_enabled:
                 return
             try:
                 snapshot(hass)
@@ -246,7 +337,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         else:
             _LOGGER.warning("Deye TOU automation skipped: ESPHome not ready")
             async with lock:
-                if not auto_enabled:
+                if not runtime["active"] or not auto_enabled:
                     return
                 last_automatic = f"{dt_util.now():%Y-%m-%d %H:%M} · ESPHome niedostępne"
                 await persist()
@@ -254,7 +345,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
         day = DAYS[dt_util.now().weekday()]
         async with lock:
-            if not auto_enabled:
+            if not runtime["active"] or not auto_enabled:
                 return
             name = assignments.get(day, "")
             if not name or name not in presets:
@@ -302,7 +393,11 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     def at_start(_event) -> None:
         hass.async_create_task(run_scheduled("start HA"))
 
-    async_track_time_change(hass, at_midnight, hour=0, minute=0, second=15)
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, at_start)
+    runtime["unsub_time"] = async_track_time_change(
+        hass, at_midnight, hour=0, minute=0, second=15
+    )
+    runtime["unsub_start"] = hass.bus.async_listen_once(
+        EVENT_HOMEASSISTANT_STARTED, at_start
+    )
+    hass.data[DOMAIN] = runtime
     publish()
-    return True

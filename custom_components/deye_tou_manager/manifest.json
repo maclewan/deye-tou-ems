@@ -1,10 +1,12 @@
 {
   "domain": "deye_tou_manager",
   "name": "Deye TOU Preset Manager",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "documentation": "https://github.com/maclewan/deye-tou-manager#readme",
   "issue_tracker": "https://github.com/maclewan/deye-tou-manager/issues",
   "iot_class": "local_push",
   "codeowners": ["@maclewan"],
-  "dependencies": ["http"]
+  "config_flow": true,
+  "single_config_entry": true,
+  "dependencies": ["http", "lovelace"]
 }

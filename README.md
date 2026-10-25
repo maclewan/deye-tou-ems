@@ -44,29 +44,33 @@ The slot voltage entities and the inverter's global Battery Grid Charging permis
 1. In HACS, open the menu and choose **Custom repositories**.
 2. Add `https://github.com/maclewan/deye-tou-manager` with category **Integration**.
 3. Find **Deye TOU Manager** in HACS and install it.
-4. Continue with [Configuration](#configuration) and restart Home Assistant.
+4. Restart Home Assistant, then open **Settings → Devices & services → Add integration**, search for **Deye TOU Preset Manager**, and confirm setup.
 
-HACS installs files under `custom_components/deye_tou_manager`. It does not add the YAML configuration or the dashboard resource for you. See [HACS custom repositories](https://www.hacs.xyz/docs/faq/custom_repositories/) for the current HACS interface.
+HACS installs files under `custom_components/deye_tou_manager`. The setup flow activates the manager without editing `configuration.yaml`. In the default dashboard resource mode, the integration also installs and updates its card resource automatically. See [HACS custom repositories](https://www.hacs.xyz/docs/faq/custom_repositories/) for the current HACS interface.
 
 ### Manual installation
 
-Copy the repository's `custom_components/deye_tou_manager` directory into `/config/custom_components/deye_tou_manager`, then continue with [Configuration](#configuration). The dashboard card is already inside the integration directory; do not copy it separately to `/config/www`.
+Copy the repository's `custom_components/deye_tou_manager` directory into `/config/custom_components/deye_tou_manager`, restart Home Assistant, then add the integration from **Settings → Devices & services**. The dashboard card is already inside the integration directory; do not copy it separately to `/config/www`.
 
 ## Configuration
 
-This integration uses YAML configuration. Add the following at the top level of `/config/configuration.yaml` if it is not already present:
+The recommended setup is through **Settings → Devices & services → Add integration → Deye TOU Preset Manager**. No YAML entry is needed. The existing Deye ESPHome entities must already be available; setup does not change inverter settings.
+
+Legacy YAML setup remains supported. If you already have the following at the top level of `/config/configuration.yaml`, you can keep it instead of adding the integration through the UI:
 
 ```yaml
 deye_tou_manager:
 ```
 
-Check the Home Assistant configuration and restart. `sensor.deye_tou_preset_manager` should then appear with `presets`, `assignments`, and `auto_enabled` attributes.
+After UI setup or a YAML configuration check and restart, `sensor.deye_tou_preset_manager` should appear with `presets`, `assignments`, and `auto_enabled` attributes. To move from YAML to UI setup, remove the YAML entry, restart, and add the integration through **Devices & services**; the saved presets use the same storage key.
 
-In **Settings → Dashboards → Resources**, add this URL as a **JavaScript module**:
+With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for this card at:
 
 ```text
 /api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.0
 ```
+
+If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
 
 Add a manual card to your dashboard:
 
@@ -74,7 +78,7 @@ Add a manual card to your dashboard:
 type: custom:deye-tou-manager-card
 ```
 
-When updating to a version with card changes, update the `?v=` query value and refresh the browser.
+After a card update, refresh the browser. Storage-mode resource URLs are updated by the integration when needed; YAML-mode resource URLs remain your responsibility.
 
 ## Usage
 
@@ -104,8 +108,8 @@ The schedule uses Home Assistant local time. Manual and scheduled applies share 
 ## Upgrading from the manual 0.3.0 installation
 
 1. Back up `/config/.storage/deye_tou_manager`.
-2. Install this repository through HACS. Keep the existing `deye_tou_manager:` entry in `configuration.yaml`.
-3. Replace the old dashboard resource `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.0`. Keep only one resource for this card.
+2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
+3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.4.0` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for this card.
 4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
 
 The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged, so saved presets need no migration. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.
@@ -114,8 +118,8 @@ The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are 
 
 | Symptom | Check |
 | --- | --- |
-| Card says the manager sensor is missing | Confirm the YAML entry, restart Home Assistant, and check the integration logs. |
-| Card does not load | Confirm the JavaScript module resource URL and refresh the browser. |
+| Card says the manager sensor is missing | Confirm the integration was added through **Devices & services**, or that the legacy YAML entry is present; restart Home Assistant and check the logs. |
+| Card does not load | Confirm that the integration is active and the single JavaScript module resource URL matches the URL above, then refresh the browser. YAML-mode resources must be edited manually. |
 | Apply fails or TOU remains off | Check ESPHome availability, the six slot readings, all seven day switches, and Home Assistant logs before manually enabling TOU. |
 | Schedule does not apply a preset | Confirm it is enabled and that today's weekday has an assignment. |
 

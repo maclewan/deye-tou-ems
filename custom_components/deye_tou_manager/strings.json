@@ -1,0 +1,10 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Deye TOU Preset Manager",
+        "description": "Use the existing Deye ESPHome entities to manage Time of Use presets. No inverter settings are changed during setup."
+      }
+    }
+  }
+}
