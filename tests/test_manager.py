@@ -702,13 +702,13 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
             await self.call("set_selling_settings", mode="semi", threshold=.5,
                             max_ranges=2, time_of_day="afternoon", min_soc=30)
-            await self.call("add_selling_range", date="2026-10-27", start="18:00")
+            await self.call("add_selling_range", date="2026-10-27", start="18:15")
             await self.call("refresh_selling_plan", day="tomorrow")
         plan = self.hass.saved["selling"]["plans"]["2026-10-27"]
         manual = next(item for item in plan["ranges"] if item.get("manual"))
-        self.assertEqual((manual["start"], manual["end"]), ("18:00", "19:00"))
+        self.assertEqual((manual["start"], manual["end"]), ("18:15", "19:15"))
         self.assertFalse(manual["approved"])
-        await self.call("approve_selling_range", date="2026-10-27", start="18:00", approved=True)
+        await self.call("approve_selling_range", date="2026-10-27", start="18:15", approved=True)
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
             await self.call("refresh_selling_plan", day="tomorrow")
         manual = next(item for item in self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"]

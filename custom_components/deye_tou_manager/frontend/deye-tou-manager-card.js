@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.5.4";
+const CARD_TRANSLATION_VERSION = "0.5.5";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -434,13 +434,18 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     const select = (id, label, value, options) =>
       `<label>${this.h(label)}<select id="${id}">${options.map(([key, text]) =>
         `<option value="${key}" ${value === key ? "selected" : ""}>${this.h(text)}</option>`).join("")}</select></label>`;
+    const manualStartOptions = [["", "sellingChooseHour"], ...Array.from({length:96}, (_, index) => {
+      const hour = String(Math.floor(index / 4)).padStart(2, "0");
+      const minute = String((index % 4) * 15).padStart(2, "0");
+      return [`${hour}:${minute}`, `${hour}:${minute}`];
+    })];
     const planHtml = day => {
       const dateKey = dateKeyFor(day);
       const plan = selling?.plans?.[dateKey];
       if (!plan) return `<section><h3>${this.h(day === "today" ? "sellingToday" : "sellingTomorrow")}</h3><p class="muted">${this.h("sellingNoPlan")}</p></section>`;
       return `<section><h3>${this.h(day === "today" ? "sellingToday" : "sellingTomorrow")} · ${this.escape(plan.date)}</h3>
         <p class="muted">${this.h("sellingSource")}: ${this.escape(plan.source_entity)}</p>
-        ${plan.ranges?.length ? plan.ranges.map(range => `<div class="range"><b>${this.escape(range.start)}–${this.escape(range.end)}</b>
+        ${plan.ranges?.length ? plan.ranges.map(range => `<div class="range"><b>${this.escape(range.start)}–${this.escape(range.end)}${range.ends_next_day ? this.h("nextDay") : ""}</b>
           <span>${range.manual ? this.h("sellingManual") : `${this.h("sellingAverage")}: ${this.escape(range.average_price)} PLN/kWh`}</span>
           <label class="approval"><input type="checkbox" data-approve-date="${dateKey}" data-approve-start="${this.escape(range.start)}" ${range.approved ? "checked" : ""}
             ${settings.mode === "semi" ? "" : "disabled"}>${this.h("sellingApproved")}</label>
@@ -485,7 +490,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       <p class="muted">${this.h("sellingScheduleNote")}</p>
       <section><h3>${this.h("sellingAddManual")}</h3><div class="grid">
         ${select("selling-manual-day","sellingManualDay","today",[["today","sellingManualToday"],["tomorrow","sellingManualTomorrow"]])}
-        ${field("selling-manual-start","sellingManualHour","time","",'step="3600" required')}
+        ${select("selling-manual-start","sellingManualHour","",manualStartOptions)}
       </div><div class="actions"><button id="selling-add-manual">${this.h("sellingAddManualButton")}</button></div>
       <p class="muted">${this.h("sellingManualFormNote")}</p></section>
       ${selling.error ? `<p class="warning">${this.escape(selling.error)}</p>` : ""}
@@ -521,7 +526,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     $("selling-add-manual")?.addEventListener("click", () => {
       const day = $("selling-manual-day").value;
       const start = $("selling-manual-start").value;
-      if (!/^(?:[01]\\d|2[0-3]):00$/.test(start)) {
+      if (!/^(?:[01]\\d|2[0-3]):(?:00|15|30|45)$/.test(start)) {
         this.status(this.tr("sellingManualHourError"), true);
         return;
       }

@@ -39,7 +39,7 @@ LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
-CARD_VERSION = "0.5.4"
+CARD_VERSION = "0.5.5"
 CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
 CARD_TRANSLATION_URL = "/api/deye_tou_manager/card-{language}.json"
@@ -603,6 +603,14 @@ async def _async_start_manager(
         return [copy.deepcopy(item) for item in (plan or {}).get("ranges", [])
                 if item.get("manual")]
 
+    def ranges_overlap(first: str, second: str) -> bool:
+        """Whether two one-hour periods starting on the same day overlap."""
+        def start_minutes(value: str) -> int:
+            hour, minute = (int(part) for part in value.split(":"))
+            return hour * 60 + minute
+        first_start, second_start = start_minutes(first), start_minutes(second)
+        return first_start < second_start + 60 and second_start < first_start + 60
+
     def manual_plan(target: datetime.date, ranges: list[dict]) -> dict:
         """Build a plan container for manual hours without price data."""
         return {
@@ -644,9 +652,11 @@ async def _async_start_manager(
                 plan["source_entity"] = entity_id
                 # A manual hour takes precedence over a suggested hour at the
                 # same start time, and is never affected by the price filter.
-                manual_starts = {item["start"] for item in manual}
                 plan["ranges"] = sorted(
-                    [item for item in plan["ranges"] if item["start"] not in manual_starts] + manual,
+                    [item for item in plan["ranges"] if not any(
+                        ranges_overlap(item["start"], manual_range["start"])
+                        for manual_range in manual
+                    )] + manual,
                     key=lambda item: item["start"],
                 )
                 # Approval is mutable user state, not part of the calculated
@@ -707,21 +717,25 @@ async def _async_start_manager(
             if target not in (today, today + timedelta(days=1)):
                 raise HomeAssistantError("Manual selling hours must be today or tomorrow")
             start = call.data["start"]
-            if not isinstance(start, str) or re.fullmatch(r"(?:[01]\d|2[0-3]):00", start) is None:
-                raise HomeAssistantError("Manual selling hour must start on a whole hour")
+            if not isinstance(start, str) or re.fullmatch(
+                r"(?:[01]\d|2[0-3]):(?:00|15|30|45)", start
+            ) is None:
+                raise HomeAssistantError("Manual selling hour must start at :00, :15, :30, or :45")
             plan = selling["plans"].get(date_key)
             ranges = manual_ranges(plan)
             all_ranges = (plan or {}).get("ranges", [])
-            if any(item.get("start") == start for item in all_ranges):
-                raise HomeAssistantError("A selling hour already exists at this time")
-            hour = int(start[:2])
+            if any(ranges_overlap(item["start"], start) for item in ranges):
+                raise HomeAssistantError("A manual selling hour already overlaps this time")
+            hour, minute = (int(part) for part in start.split(":"))
             ranges.append({
-                "start": start, "end": f"{hour + 1:02d}:00", "average_price": None,
-                "hours": [], "manual": True, "approved": False,
+                "start": start, "end": f"{(hour + 1) % 24:02d}:{minute:02d}",
+                "ends_next_day": hour == 23, "average_price": None, "hours": [],
+                "manual": True, "approved": False,
             })
             if plan:
                 plan["ranges"] = sorted(
-                    [item for item in all_ranges if not item.get("manual")] + ranges,
+                    [item for item in all_ranges if not item.get("manual")
+                     and not ranges_overlap(item["start"], start)] + ranges,
                     key=lambda item: item["start"],
                 )
             else:

@@ -164,7 +164,7 @@ add_selling_range:
       selector:
         text:
     start:
-      name: Start hour (HH:00)
+      name: Start time (HH:00, HH:15, HH:30, or HH:45)
       required: true
       selector:
         text:

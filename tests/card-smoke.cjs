@@ -160,7 +160,7 @@ async function testRename() {
   assert.equal(card._editor.presetId, "stable-hash-id");
   assert.equal(card._pendingSavedName, null);
   global.fetch = async url => {
-    assert.match(url, /card-pl\.json\?v=0\.5\.4$/);
+    assert.match(url, /card-pl\.json\?v=0\.5\.5$/);
     return { ok: true, json: async () => polish };
   };
   card.hass = { ...card._hass, language: "pl" };
@@ -181,8 +181,8 @@ async function testRename() {
   const uncachedCard = new Card();
   uncachedCard.setConfig({});
   global.fetch = async url => {
-    if (/card-pl\.json\?v=0\.5\.4$/.test(url)) return { ok: false };
-    assert.match(url, /card-en\.json\?v=0\.5\.4$/);
+    if (/card-pl\.json\?v=0\.5\.5$/.test(url)) return { ok: false };
+    assert.match(url, /card-en\.json\?v=0\.5\.5$/);
     return { ok: true, json: async () => english };
   };
   uncachedCard.hass = { language: "pl", states: {} };
