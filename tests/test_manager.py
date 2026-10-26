@@ -148,6 +148,7 @@ class FakeHass:
         self.listeners = {}
         self.midnight_callback = None
         self.evening_callback = None
+        self.selling_tick_callback = None
         self.tasks = []
         self.http = SimpleNamespace(async_register_static_paths=self.register_paths)
         self.bus = SimpleNamespace(async_listen_once=self.listen_once)
@@ -208,6 +209,10 @@ def load_integration():
         setattr(hass, field, callback)
         return lambda: setattr(hass, field, None)
     modules["homeassistant.helpers.event"].async_track_time_change = track_time
+    def track_interval(hass, callback, _interval):
+        hass.selling_tick_callback = callback
+        return lambda: setattr(hass, "selling_tick_callback", None)
+    modules["homeassistant.helpers.event"].async_track_time_interval = track_interval
     modules["homeassistant.helpers.entity_registry"].async_get = lambda hass: SimpleNamespace(
         entities=hass.registry_entities,
         async_get=lambda entity_id: hass.registry_entities.get(entity_id),
@@ -400,12 +405,14 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
             MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode",
             MANAGER.CONF_TODAY_PRICE_ENTITY: "",
             MANAGER.CONF_TOMORROW_PRICE_ENTITY: "",
+            MANAGER.CONF_BATTERY_SOC_ENTITY: "sensor.new_battery_bms_soc",
         }), {
             "type": "create_entry", "title": "",
             "data": {
                 MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode",
                 MANAGER.CONF_TODAY_PRICE_ENTITY: "",
                 MANAGER.CONF_TOMORROW_PRICE_ENTITY: "",
+                MANAGER.CONF_BATTERY_SOC_ENTITY: "sensor.new_battery_bms_soc",
             },
         })
 
@@ -422,6 +429,7 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
             MANAGER.CONF_WORK_MODE_ENTITY: "select.new_system_work_mode",
             MANAGER.CONF_TODAY_PRICE_ENTITY: today,
             MANAGER.CONF_TOMORROW_PRICE_ENTITY: tomorrow,
+            MANAGER.CONF_BATTERY_SOC_ENTITY: "sensor.new_battery_bms_soc",
         })
         self.assertEqual(result["type"], "create_entry")
         self.assertEqual(result["data"][MANAGER.CONF_TODAY_PRICE_ENTITY], today)
@@ -445,6 +453,8 @@ class ResourceAndSetupTests(unittest.IsolatedAsyncioTestCase):
         settings = hass.states[MANAGER.ENTITY].attributes["selling"]["settings"]
         self.assertEqual(settings[MANAGER.CONF_TODAY_PRICE_ENTITY], today)
         self.assertEqual(settings[MANAGER.CONF_TOMORROW_PRICE_ENTITY], tomorrow)
+        self.assertEqual(settings[MANAGER.CONF_BATTERY_SOC_ENTITY],
+                         "sensor.deye_inverter_esp32_battery_bms_soc")
 
     async def test_auto_detects_one_nondefault_inverter_for_legacy_yaml(self):
         hass = FakeHass()
@@ -720,6 +730,70 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(retained[0]["manual"])
         await self.call("clear_selling_plans")
         self.assertEqual(self.hass.saved["selling"]["plans"], {})
+
+    async def test_approved_selling_period_changes_only_mode_and_active_soc_then_restores(self):
+        soc_entity = "sensor.deye_inverter_esp32_battery_bms_soc"
+        self.hass.states.async_set(soc_entity, "80")
+        now = datetime(2026, 10, 26, 18, 20)
+        with patch.object(MANAGER.dt_util, "now", return_value=now):
+            await self.call("set_selling_settings", mode="semi", control_enabled=True,
+                            min_soc=35, battery_soc_entity=soc_entity)
+            await self.call("add_selling_range", date="2026-10-26", start="18:15")
+            await self.call("approve_selling_range", date="2026-10-26", start="18:15", approved=True)
+            self.hass.selling_tick_callback(None)
+            await self.hass.finish_tasks()
+        work_mode = MANAGER.eid(TEST_PREFIX, "select", "system_work_mode")
+        active_soc = MANAGER.slot_id(TEST_PREFIX, "number", 5, "soc")
+        self.assertEqual(self.hass.states[work_mode].state, "Selling First")
+        self.assertEqual(self.hass.states[active_soc].state, "35.0")
+        self.assertEqual(self.hass.saved["selling"]["session"]["slot"], 4)
+        self.assertEqual(self.hass.saved["selling"]["session"]["snapshot"], sample_preset())
+        self.hass.states.async_set(soc_entity, "35")
+        with patch.object(MANAGER.dt_util, "now", return_value=now + timedelta(minutes=5)):
+            self.hass.selling_tick_callback(None)
+            await self.hass.finish_tasks()
+        self.assertEqual(self.hass.states[work_mode].state, "Zero Export To CT")
+        self.assertEqual(self.hass.states[active_soc].state, "60.0")
+        selling_range = self.hass.saved["selling"]["plans"]["2026-10-26"]["ranges"][0]
+        self.assertTrue(selling_range["completed"])
+        self.assertEqual(selling_range["completion_reason"], "minimum SOC reached")
+        writes_after_stop = len(self.hass.services.writes)
+        self.hass.states.async_set(soc_entity, "50")
+        with patch.object(MANAGER.dt_util, "now", return_value=now + timedelta(minutes=10)):
+            self.hass.selling_tick_callback(None)
+            await self.hass.finish_tasks()
+        self.assertEqual(len(self.hass.services.writes), writes_after_stop)
+
+    async def test_startup_recovers_an_interrupted_selling_session(self):
+        snapshot = sample_preset()
+        saved = {
+            "preset_schema": 2, "presets": {}, "assignments": {}, "auto_enabled": False,
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.deye_inverter_esp32_system_work_mode",
+            "selling": {
+                "settings": {**MANAGER.SELLING_DEFAULTS, "mode": "semi", "control_enabled": True,
+                             "battery_soc_entity": "sensor.deye_inverter_esp32_battery_bms_soc", "min_soc": 35},
+                "plans": {"2026-10-26": {"ranges": [{"start": "18:15", "approved": True}]}},
+                "session": {"date": "2026-10-26", "start": "18:15", "end": "2026-10-26T19:15:00",
+                            "slot": 4, "snapshot": snapshot,
+                            "battery_soc_entity": "sensor.deye_inverter_esp32_battery_bms_soc", "min_soc": 35},
+            },
+        }
+        hass = FakeHass(saved)
+        put_live(hass, snapshot)
+        work_mode = MANAGER.eid(TEST_PREFIX, "select", "system_work_mode")
+        active_soc = MANAGER.slot_id(TEST_PREFIX, "number", 5, "soc")
+        hass.states.async_set(work_mode, "Selling First")
+        hass.states.async_set(active_soc, "35")
+        hass.states.async_set("sensor.deye_inverter_esp32_battery_bms_soc", "35")
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18, 25)):
+            await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {}})
+            hass.listeners["homeassistant_started"](None)
+            await hass.finish_tasks()
+        self.assertEqual(hass.states[work_mode].state, "Zero Export To CT")
+        self.assertEqual(hass.states[active_soc].state, "60.0")
+        self.assertIsNone(hass.saved["selling"]["session"])
+        recovered_range = hass.saved["selling"]["plans"]["2026-10-26"]["ranges"][0]
+        self.assertTrue(recovered_range["completed"])
 
     async def test_offline_services_persist_without_inverter_writes(self):
         preset = sample_preset()

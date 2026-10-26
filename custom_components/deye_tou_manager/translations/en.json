@@ -7,7 +7,8 @@
         "data": {
           "work_mode_entity": "Inverter Work Mode entity",
           "today_price_entity": "RCE PSE Price entity",
-          "tomorrow_price_entity": "RCE PSE Price Tomorrow entity"
+          "tomorrow_price_entity": "RCE PSE Price Tomorrow entity",
+          "battery_soc_entity": "Battery SOC sensor (normally sensor.<inverter prefix>_battery_bms_soc)"
         }
       }
     },
@@ -25,7 +26,8 @@
         "data": {
           "work_mode_entity": "Inverter Work Mode entity",
           "today_price_entity": "RCE PSE Price entity (automatic detection when empty)",
-          "tomorrow_price_entity": "RCE PSE Price Tomorrow entity (automatic detection when empty)"
+          "tomorrow_price_entity": "RCE PSE Price Tomorrow entity (automatic detection when empty)",
+          "battery_soc_entity": "Battery SOC sensor (normally sensor.<inverter prefix>_battery_bms_soc)"
         }
       }
     },

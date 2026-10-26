@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.5.5";
+const CARD_TRANSLATION_VERSION = "0.6.0";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -431,6 +431,8 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     };
     const field = (id, label, type, value, extra="") =>
       `<label>${this.h(label)}<input id="${id}" type="${type}" value="${this.escape(value ?? "")}" ${extra}></label>`;
+    const checkbox = (id, label, checked) =>
+      `<label class="control-toggle"><input id="${id}" type="checkbox" ${checked ? "checked" : ""}>${this.h(label)}</label>`;
     const select = (id, label, value, options) =>
       `<label>${this.h(label)}<select id="${id}">${options.map(([key, text]) =>
         `<option value="${key}" ${value === key ? "selected" : ""}>${this.h(text)}</option>`).join("")}</select></label>`;
@@ -464,7 +466,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       button.primary{background:var(--primary-color);color:var(--text-primary-color);border:0}
       .actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.range{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--divider-color);padding:10px;border-radius:8px;margin:7px 0}
       .range small{width:100%;color:var(--secondary-text-color)}section{border-top:1px solid var(--divider-color);padding-top:14px;margin-top:14px}
-      .approval{flex-direction:row;align-items:center;margin-top:12px}.approval input{width:18px;min-height:18px}
+      .approval,.control-toggle{flex-direction:row;align-items:center;margin-top:12px}.approval input,.control-toggle input{width:18px;min-height:18px}
       .language-picker{display:flex;flex-direction:row;align-items:center}.language-picker select{width:auto;min-height:32px}
       #status{min-height:18px;font-size:12px;color:var(--success-color)}#status.error{color:var(--error-color)}
       @media(max-width:560px){.grid{grid-template-columns:1fr}ha-card{padding:15px}}
@@ -473,9 +475,10 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
         ${[["auto","languageAuto"],["en","languageEnglish"],["pl","languagePolish"]].map(([value,key]) =>
           `<option value="${value}" ${this._languageChoice === value ? "selected" : ""}>${this.h(key)}</option>`).join("")}
       </select></label></div>
-      <p class="warning">${this.h("sellingPreviewOnly")}</p>
+      <p class="warning">${settings.control_enabled ? this.h("sellingControlEnabledWarning") : this.h("sellingPreviewOnly")}</p>
       ${!selling ? `<p class="muted">${this.h("missingSensor")}</p>` : `<div class="grid">
         ${select("sell-mode","sellingMode",settings.mode,[["off","sellingOff"],["semi","sellingSemi"],["automatic","sellingAutomatic"]])}
+        ${checkbox("sell-control","sellingControlEnabled",settings.control_enabled)}
         ${field("sell-threshold","sellingThreshold","number",settings.threshold,'min="0" step="0.01"')}
         ${field("sell-ranges","sellingMaxRanges","number",settings.max_ranges,'min="1" max="6" step="1"')}
         ${select("sell-period","sellingPeriod",settings.time_of_day,[["morning","sellingMorning"],["afternoon","sellingAfternoon"],["any","sellingAny"]])}
@@ -487,6 +490,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
         <button id="sell-clear">${this.h("sellingClear")}</button></div>
       <p class="muted">${this.h("sellingThresholdNote")}</p>
       <p class="muted">${this.h("sellingEntityConfigNote", {today:detected.today || this.tr("sellingAutoDetect"), tomorrow:detected.tomorrow || this.tr("sellingAutoDetect")})}</p>
+      <p class="muted">${this.h("sellingSocConfigNote", {entity:settings.battery_soc_entity || this.tr("sellingSocAutoDetect")})}</p>
       <p class="muted">${this.h("sellingScheduleNote")}</p>
       <section><h3>${this.h("sellingAddManual")}</h3><div class="grid">
         ${select("selling-manual-day","sellingManualDay","today",[["today","sellingManualToday"],["tomorrow","sellingManualTomorrow"]])}
@@ -494,6 +498,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       </div><div class="actions"><button id="selling-add-manual">${this.h("sellingAddManualButton")}</button></div>
       <p class="muted">${this.h("sellingManualFormNote")}</p></section>
       ${selling.error ? `<p class="warning">${this.escape(selling.error)}</p>` : ""}
+      ${selling.session ? `<p class="warning">${this.h("sellingActive", {start:selling.session.start, end:selling.session.end})}</p>` : ""}
       ${planHtml("today")}${planHtml("tomorrow")}`}
       <div id="status" role="status"></div></ha-card>`;
     const $ = id => this.shadowRoot.getElementById(id);
@@ -502,13 +507,20 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       try { window.localStorage?.setItem(CARD_LANGUAGE_KEY, this._languageChoice); } catch (_) { /* unavailable */ }
       this.updateLanguage(); this.render();
     });
-    const ids = ["sell-mode","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power"];
+    const ids = ["sell-mode","sell-control","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power"];
     const readSettings = () => ({
-      mode:$("sell-mode").value, threshold:Number($("sell-threshold").value),
+      mode:$("sell-mode").value, control_enabled:$("sell-control").checked,
+      threshold:Number($("sell-threshold").value),
       max_ranges:Number($("sell-ranges").value), time_of_day:$("sell-period").value,
       min_soc:Number($("sell-soc").value), power_override:$("sell-power").value === "" ? null : Number($("sell-power").value)
     });
     ids.forEach(id => $(id)?.addEventListener("change", () => { this._settingsDraft = readSettings(); }));
+    $("sell-control")?.addEventListener("change", event => {
+      if (event.target.checked && !window.confirm(this.tr("sellingControlConfirm"))) {
+        event.target.checked = false;
+        this._settingsDraft = readSettings();
+      }
+    });
     $("sell-save")?.addEventListener("click", async () => {
       const next = readSettings();
       await this.act("set_selling_settings", next);

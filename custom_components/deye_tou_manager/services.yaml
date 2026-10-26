@@ -86,7 +86,7 @@ set_auto:
         boolean:
 set_selling_settings:
   name: Set selling planning settings
-  description: Save price-planning settings only; does not change inverter settings.
+  description: Save selling settings. Enabling inverter control allows approved active periods to change Work Mode and the active TOU SOC.
   fields:
     mode:
       name: Planning mode
@@ -96,6 +96,11 @@ set_selling_settings:
             - off
             - semi
             - automatic
+    control_enabled:
+      name: Enable inverter control
+      description: Opt in to physical inverter changes during approved selling periods.
+      selector:
+        boolean:
     threshold:
       name: Minimum hourly price (PLN/kWh)
       selector:
@@ -119,7 +124,7 @@ set_selling_settings:
             - afternoon
             - any
     min_soc:
-      name: Minimum battery SOC (future control limit)
+      name: Minimum battery SOC
       selector:
         number:
           min: 0
@@ -137,6 +142,12 @@ set_selling_settings:
           domain: sensor
     tomorrow_price_entity:
       name: RCE PSE Price Tomorrow entity override
+      selector:
+        entity:
+          domain: sensor
+    battery_soc_entity:
+      name: Battery BMS SOC entity
+      description: Normally configured through the integration options.
       selector:
         entity:
           domain: sensor

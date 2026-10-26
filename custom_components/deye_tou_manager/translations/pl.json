@@ -7,7 +7,8 @@
         "data": {
           "work_mode_entity": "Encja trybu pracy falownika",
           "today_price_entity": "Encja RCE PSE Cena",
-          "tomorrow_price_entity": "Encja RCE PSE Cena Jutro"
+          "tomorrow_price_entity": "Encja RCE PSE Cena Jutro",
+          "battery_soc_entity": "Sensor SOC baterii (zwykle sensor.<prefix falownika>_battery_bms_soc)"
         }
       }
     },
@@ -25,7 +26,8 @@
         "data": {
           "work_mode_entity": "Encja trybu pracy falownika",
           "today_price_entity": "Encja RCE PSE Cena (automatyczne wykrywanie po pozostawieniu pustego)",
-          "tomorrow_price_entity": "Encja RCE PSE Cena Jutro (automatyczne wykrywanie po pozostawieniu pustego)"
+          "tomorrow_price_entity": "Encja RCE PSE Cena Jutro (automatyczne wykrywanie po pozostawieniu pustego)",
+          "battery_soc_entity": "Sensor SOC baterii (zwykle sensor.<prefix falownika>_battery_bms_soc)"
         }
       }
     },

@@ -7,8 +7,10 @@ import voluptuous as vol
 from . import (
     CONF_TODAY_PRICE_ENTITY,
     CONF_TOMORROW_PRICE_ENTITY,
+    CONF_BATTERY_SOC_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
+    default_battery_soc_entity,
     rce_price_entities,
     work_mode_candidates,
 )
@@ -63,6 +65,9 @@ class DeyeTouManagerOptionsFlow(config_entries.OptionsFlow):
         price_entities = rce_price_entities(self.hass)
         today_prices = ["", price_entities.get("today", "")]
         tomorrow_prices = ["", price_entities.get("tomorrow", "")]
+        battery_default = self.config_entry.options.get(
+            CONF_BATTERY_SOC_ENTITY, default_battery_soc_entity(current or candidates[0])
+        )
         for values, current_key in (
             (today_prices, CONF_TODAY_PRICE_ENTITY),
             (tomorrow_prices, CONF_TOMORROW_PRICE_ENTITY),
@@ -71,10 +76,14 @@ class DeyeTouManagerOptionsFlow(config_entries.OptionsFlow):
             if configured and configured not in values:
                 values.append(configured)
         if user_input is not None:
+            battery_soc = user_input.get(CONF_BATTERY_SOC_ENTITY, "")
             if (user_input[CONF_WORK_MODE_ENTITY] in candidates
                     and user_input[CONF_TODAY_PRICE_ENTITY] in today_prices
-                    and user_input[CONF_TOMORROW_PRICE_ENTITY] in tomorrow_prices):
-                return self.async_create_entry(title="", data=user_input)
+                    and user_input[CONF_TOMORROW_PRICE_ENTITY] in tomorrow_prices
+                    and isinstance(battery_soc, str) and battery_soc.startswith("sensor.")):
+                return self.async_create_entry(title="", data={
+                    **user_input, CONF_BATTERY_SOC_ENTITY: battery_soc,
+                })
             errors = {"base": "invalid_entity"}
         else:
             errors = {}
@@ -88,6 +97,7 @@ class DeyeTouManagerOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_TOMORROW_PRICE_ENTITY, default=self.config_entry.options.get(
                     CONF_TOMORROW_PRICE_ENTITY, price_entities.get("tomorrow", "")
                 )): vol.In(tomorrow_prices),
+                vol.Required(CONF_BATTERY_SOC_ENTITY, default=battery_default): str,
             }),
             errors=errors,
         )

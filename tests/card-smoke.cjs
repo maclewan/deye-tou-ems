@@ -133,10 +133,11 @@ sellingCard.hass = { states: {
 } };
 assert.match(sellingCard.shadowRoot.innerHTML, /Energy selling planner/);
 assert.match(sellingCard.shadowRoot.innerHTML, /18:00–19:00/);
-assert.match(sellingCard.shadowRoot.innerHTML, /Planning and approval only/);
+assert.match(sellingCard.shadowRoot.innerHTML, /Inverter control is disabled/);
 assert.match(sellingCard.shadowRoot.innerHTML, /data-approve-date="2026-10-26"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-clear"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /id="selling-add-manual"/);
+assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-control"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /minimum price filters only automatic price suggestions/);
 
 async function testRename() {
@@ -160,7 +161,7 @@ async function testRename() {
   assert.equal(card._editor.presetId, "stable-hash-id");
   assert.equal(card._pendingSavedName, null);
   global.fetch = async url => {
-    assert.match(url, /card-pl\.json\?v=0\.5\.5$/);
+    assert.match(url, /card-pl\.json\?v=0\.6\.0$/);
     return { ok: true, json: async () => polish };
   };
   card.hass = { ...card._hass, language: "pl" };
@@ -181,8 +182,8 @@ async function testRename() {
   const uncachedCard = new Card();
   uncachedCard.setConfig({});
   global.fetch = async url => {
-    if (/card-pl\.json\?v=0\.5\.5$/.test(url)) return { ok: false };
-    assert.match(url, /card-en\.json\?v=0\.5\.5$/);
+    if (/card-pl\.json\?v=0\.6\.0$/.test(url)) return { ok: false };
+    assert.match(url, /card-en\.json\?v=0\.6\.0$/);
     return { ok: true, json: async () => english };
   };
   uncachedCard.hass = { language: "pl", states: {} };
