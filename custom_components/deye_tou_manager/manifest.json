@@ -2,7 +2,7 @@
   "domain": "deye_tou_manager",
   "name": "Deye TOU Preset Manager",
   "categories": ["energy.solar_batteries"],
-  "version": "0.5.3",
+  "version": "0.5.4",
   "documentation": "https://github.com/maclewan/deye-tou-manager#readme",
   "issue_tracker": "https://github.com/maclewan/deye-tou-manager/issues",
   "iot_class": "local_push",

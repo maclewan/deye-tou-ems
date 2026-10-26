@@ -697,6 +697,30 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("2026-10-27", self.hass.saved["selling"]["plans"])
         self.assertIn("complete 96-quarter", self.hass.saved["selling"]["error"])
 
+    async def test_manual_selling_hour_survives_checks_and_can_be_cleared(self):
+        put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            await self.call("set_selling_settings", mode="semi", threshold=.5,
+                            max_ranges=2, time_of_day="afternoon", min_soc=30)
+            await self.call("add_selling_range", date="2026-10-27", start="18:00")
+            await self.call("refresh_selling_plan", day="tomorrow")
+        plan = self.hass.saved["selling"]["plans"]["2026-10-27"]
+        manual = next(item for item in plan["ranges"] if item.get("manual"))
+        self.assertEqual((manual["start"], manual["end"]), ("18:00", "19:00"))
+        self.assertFalse(manual["approved"])
+        await self.call("approve_selling_range", date="2026-10-27", start="18:00", approved=True)
+        with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
+            await self.call("refresh_selling_plan", day="tomorrow")
+        manual = next(item for item in self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"]
+                      if item.get("manual"))
+        self.assertTrue(manual["approved"])
+        await self.call("set_selling_settings", threshold=.7)
+        retained = self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"]
+        self.assertEqual(len(retained), 1)
+        self.assertTrue(retained[0]["manual"])
+        await self.call("clear_selling_plans")
+        self.assertEqual(self.hass.saved["selling"]["plans"], {})
+
     async def test_offline_services_persist_without_inverter_writes(self):
         preset = sample_preset()
         await self.call("save_definition", name="Weekday", preset=preset)

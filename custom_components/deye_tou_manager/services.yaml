@@ -151,6 +151,23 @@ refresh_selling_plan:
           options:
             - today
             - tomorrow
+clear_selling_plans:
+  name: Clear selling findings
+  description: Remove all calculated and manually added selling hours. Does not change inverter settings.
+add_selling_range:
+  name: Add manual selling hour
+  description: Add a one-hour manual selling period for today or tomorrow. Does not change inverter settings.
+  fields:
+    date:
+      name: Date (YYYY-MM-DD)
+      required: true
+      selector:
+        text:
+    start:
+      name: Start hour (HH:00)
+      required: true
+      selector:
+        text:
 approve_selling_range:
   name: Approve selling hour
   description: Approve or unapprove one semi-automatic one-hour selling block. Does not change the inverter.

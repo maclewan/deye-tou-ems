@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.5.3";
+const CARD_TRANSLATION_VERSION = "0.5.4";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -96,11 +96,13 @@ class DeyeTouManagerCard extends HTMLElement {
     try {
       await this._hass.callService("deye_tou_manager", service, data);
       this.status(this.tr("done"), false);
+      return true;
     } catch (err) {
       const recovery = service === "apply"
         ? this.tr("applyRecovery")
         : "";
       this.status(this.tr("errorPrefix") + (err?.message || err) + recovery, true);
+      return false;
     } finally { this._busy = false; }
   }
   status(message, error) {
@@ -422,24 +424,27 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     const selling = attributes?.selling;
     const settings = this._settingsDraft || selling?.settings || {};
     const detected = attributes?.rce_price_entities || {};
+    const dateKeyFor = day => {
+      const date = new Date(`${attributes?.ha_local_date || new Date().toISOString().slice(0,10)}T12:00:00`);
+      if (day === "tomorrow") date.setDate(date.getDate() + 1);
+      return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+    };
     const field = (id, label, type, value, extra="") =>
       `<label>${this.h(label)}<input id="${id}" type="${type}" value="${this.escape(value ?? "")}" ${extra}></label>`;
     const select = (id, label, value, options) =>
       `<label>${this.h(label)}<select id="${id}">${options.map(([key, text]) =>
         `<option value="${key}" ${value === key ? "selected" : ""}>${this.h(text)}</option>`).join("")}</select></label>`;
     const planHtml = day => {
-      const date = new Date(`${attributes?.ha_local_date || new Date().toISOString().slice(0,10)}T12:00:00`);
-      if (day === "tomorrow") date.setDate(date.getDate() + 1);
-      const dateKey = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+      const dateKey = dateKeyFor(day);
       const plan = selling?.plans?.[dateKey];
       if (!plan) return `<section><h3>${this.h(day === "today" ? "sellingToday" : "sellingTomorrow")}</h3><p class="muted">${this.h("sellingNoPlan")}</p></section>`;
       return `<section><h3>${this.h(day === "today" ? "sellingToday" : "sellingTomorrow")} · ${this.escape(plan.date)}</h3>
         <p class="muted">${this.h("sellingSource")}: ${this.escape(plan.source_entity)}</p>
         ${plan.ranges?.length ? plan.ranges.map(range => `<div class="range"><b>${this.escape(range.start)}–${this.escape(range.end)}</b>
-          <span>${this.h("sellingAverage")}: ${this.escape(range.average_price)} PLN/kWh</span>
+          <span>${range.manual ? this.h("sellingManual") : `${this.h("sellingAverage")}: ${this.escape(range.average_price)} PLN/kWh`}</span>
           <label class="approval"><input type="checkbox" data-approve-date="${dateKey}" data-approve-start="${this.escape(range.start)}" ${range.approved ? "checked" : ""}
             ${settings.mode === "semi" ? "" : "disabled"}>${this.h("sellingApproved")}</label>
-          <small>${range.hours.map(hour => `${this.escape(hour.start)} ${this.escape(hour.price)}`).join(" · ")}</small></div>`).join("")
+          <small>${range.manual ? this.h("sellingManualNote") : range.hours.map(hour => `${this.escape(hour.start)} ${this.escape(hour.price)}`).join(" · ")}</small></div>`).join("")
           : `<p class="muted">${this.h("sellingBelowThreshold")}</p>`}
       </section>`;
     };
@@ -473,9 +478,16 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
         ${field("sell-power","sellingPower","number",settings.power_override,'min="1" max="12000" step="1"')}
       </div><div class="actions"><button class="primary" id="sell-save">${this.h("sellingSave")}</button>
         <button id="sell-check-today">${this.h("sellingCheckToday")}</button>
-        <button id="sell-check-tomorrow">${this.h("sellingCheckTomorrow")}</button></div>
+        <button id="sell-check-tomorrow">${this.h("sellingCheckTomorrow")}</button>
+        <button id="sell-clear">${this.h("sellingClear")}</button></div>
+      <p class="muted">${this.h("sellingThresholdNote")}</p>
       <p class="muted">${this.h("sellingEntityConfigNote", {today:detected.today || this.tr("sellingAutoDetect"), tomorrow:detected.tomorrow || this.tr("sellingAutoDetect")})}</p>
       <p class="muted">${this.h("sellingScheduleNote")}</p>
+      <section><h3>${this.h("sellingAddManual")}</h3><div class="grid">
+        ${select("selling-manual-day","sellingManualDay","today",[["today","sellingManualToday"],["tomorrow","sellingManualTomorrow"]])}
+        ${field("selling-manual-start","sellingManualHour","time","",'step="3600" required')}
+      </div><div class="actions"><button id="selling-add-manual">${this.h("sellingAddManualButton")}</button></div>
+      <p class="muted">${this.h("sellingManualFormNote")}</p></section>
       ${selling.error ? `<p class="warning">${this.escape(selling.error)}</p>` : ""}
       ${planHtml("today")}${planHtml("tomorrow")}`}
       <div id="status" role="status"></div></ha-card>`;
@@ -497,8 +509,24 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       await this.act("set_selling_settings", next);
       this._settingsDraft = null;
     });
-    $("sell-check-today")?.addEventListener("click", () => this.act("refresh_selling_plan", {day:"today"}));
-    $("sell-check-tomorrow")?.addEventListener("click", () => this.act("refresh_selling_plan", {day:"tomorrow"}));
+    const saveAndCheck = async day => {
+      if (await this.act("set_selling_settings", readSettings())) {
+        this._settingsDraft = null;
+        await this.act("refresh_selling_plan", {day});
+      }
+    };
+    $("sell-check-today")?.addEventListener("click", () => saveAndCheck("today"));
+    $("sell-check-tomorrow")?.addEventListener("click", () => saveAndCheck("tomorrow"));
+    $("sell-clear")?.addEventListener("click", () => this.act("clear_selling_plans", {}));
+    $("selling-add-manual")?.addEventListener("click", () => {
+      const day = $("selling-manual-day").value;
+      const start = $("selling-manual-start").value;
+      if (!/^(?:[01]\\d|2[0-3]):00$/.test(start)) {
+        this.status(this.tr("sellingManualHourError"), true);
+        return;
+      }
+      this.act("add_selling_range", {date:dateKeyFor(day), start});
+    });
     this.shadowRoot.querySelectorAll("[data-approve-date]").forEach(el => el.addEventListener("change", event =>
       this.act("approve_selling_range", {date:event.target.dataset.approveDate,
         start:event.target.dataset.approveStart, approved:event.target.checked})));

@@ -39,7 +39,7 @@ LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
-CARD_VERSION = "0.5.3"
+CARD_VERSION = "0.5.4"
 CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
 CARD_TRANSLATION_URL = "/api/deye_tou_manager/card-{language}.json"
@@ -331,7 +331,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime["unsub_start"]()
     runtime["unsub_selling_time"]()
     for service in ("save_current", "save_definition", "delete", "assign_day", "apply", "set_auto",
-                    "set_selling_settings", "refresh_selling_plan", "approve_selling_range"):
+                    "set_selling_settings", "refresh_selling_plan", "clear_selling_plans",
+                    "add_selling_range", "approve_selling_range"):
         hass.services.async_remove(DOMAIN, service)
     hass.states.async_remove(ENTITY)
     hass.data.pop(DOMAIN)
@@ -582,9 +583,35 @@ async def _async_start_manager(
             settings = validate_selling_settings(call.data, selling["settings"])
             if settings != selling["settings"]:
                 selling["settings"] = settings
-                selling["plans"] = {}
+                # Price-derived findings are no longer valid after a settings
+                # change. Manual hours are an explicit user choice, so retain
+                # them until they are cleared.
+                selling["plans"] = {
+                    date_key: {
+                        **plan,
+                        "ranges": [item for item in plan.get("ranges", [])
+                                   if item.get("manual")],
+                    }
+                    for date_key, plan in selling["plans"].items()
+                    if any(item.get("manual") for item in plan.get("ranges", []))
+                }
                 selling["error"] = ""
                 await persist()
+
+    def manual_ranges(plan: dict | None) -> list[dict]:
+        """Return a safe copy of explicitly added selling hours."""
+        return [copy.deepcopy(item) for item in (plan or {}).get("ranges", [])
+                if item.get("manual")]
+
+    def manual_plan(target: datetime.date, ranges: list[dict]) -> dict:
+        """Build a plan container for manual hours without price data."""
+        return {
+            "date": target.isoformat(), "price_unit": "PLN/kWh",
+            "threshold": selling["settings"]["threshold"],
+            "time_of_day": selling["settings"]["time_of_day"],
+            "max_ranges": selling["settings"]["max_ranges"],
+            "source_entity": "manual", "ranges": ranges,
+        }
 
     async def refresh_selling_plan_for(day: str, *, midnight_check: bool = False) -> None:
         """Read RCE PSE price records and store a plan; never write the inverter."""
@@ -594,6 +621,8 @@ async def _async_start_manager(
             now = dt_util.now()
             target = now.date() + timedelta(days=day == "tomorrow")
             settings = selling["settings"]
+            previous = selling["plans"].get(target.isoformat())
+            manual = manual_ranges(previous)
             entity_id = settings[f"{day}_price_entity"] or rce_price_entities(hass).get(day)
             selling["last_check"] = now.isoformat(timespec="seconds")
             try:
@@ -613,8 +642,23 @@ async def _async_start_manager(
                     time_of_day=settings["time_of_day"],
                 )
                 plan["source_entity"] = entity_id
-                plan["id"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
-                previous = selling["plans"].get(target.isoformat(), {})
+                # A manual hour takes precedence over a suggested hour at the
+                # same start time, and is never affected by the price filter.
+                manual_starts = {item["start"] for item in manual}
+                plan["ranges"] = sorted(
+                    [item for item in plan["ranges"] if item["start"] not in manual_starts] + manual,
+                    key=lambda item: item["start"],
+                )
+                # Approval is mutable user state, not part of the calculated
+                # finding's identity. Including it would revoke approval on
+                # every otherwise unchanged refresh of a manual hour.
+                identity = copy.deepcopy(plan)
+                for selling_range in identity["ranges"]:
+                    selling_range.pop("approved", None)
+                plan["id"] = hashlib.sha256(
+                    json.dumps(identity, sort_keys=True).encode()
+                ).hexdigest()
+                previous = previous or {}
                 preserve_approval = previous.get("id") == plan["id"]
                 for selling_range in plan["ranges"]:
                     old_range = next((item for item in previous.get("ranges", [])
@@ -632,13 +676,58 @@ async def _async_start_manager(
                 selling["plans"][target.isoformat()] = plan
                 selling["error"] = ""
             except (HomeAssistantError, SellingPlanError, KeyError, TypeError) as err:
-                selling["plans"].pop(target.isoformat(), None)
+                if manual:
+                    selling["plans"][target.isoformat()] = manual_plan(target, manual)
+                else:
+                    selling["plans"].pop(target.isoformat(), None)
                 selling["error"] = str(err)
                 _LOGGER.warning("Selling plan unavailable for %s: %s", target, err)
             await persist()
 
     async def refresh_selling_plan(call: ServiceCall) -> None:
         await refresh_selling_plan_for(call.data.get("day", "tomorrow"))
+
+    async def clear_selling_plans(_call: ServiceCall) -> None:
+        """Remove all automatic findings and manually added hours."""
+        async with lock:
+            selling["plans"] = {}
+            selling["error"] = ""
+            selling["last_check"] = ""
+            await persist()
+
+    async def add_selling_range(call: ServiceCall) -> None:
+        """Store an explicit one-hour selling period without price data."""
+        async with lock:
+            date_key = call.data["date"]
+            try:
+                target = datetime.strptime(date_key, "%Y-%m-%d").date()
+            except (TypeError, ValueError) as err:
+                raise HomeAssistantError("Selling date must be YYYY-MM-DD") from err
+            today = dt_util.now().date()
+            if target not in (today, today + timedelta(days=1)):
+                raise HomeAssistantError("Manual selling hours must be today or tomorrow")
+            start = call.data["start"]
+            if not isinstance(start, str) or re.fullmatch(r"(?:[01]\d|2[0-3]):00", start) is None:
+                raise HomeAssistantError("Manual selling hour must start on a whole hour")
+            plan = selling["plans"].get(date_key)
+            ranges = manual_ranges(plan)
+            all_ranges = (plan or {}).get("ranges", [])
+            if any(item.get("start") == start for item in all_ranges):
+                raise HomeAssistantError("A selling hour already exists at this time")
+            hour = int(start[:2])
+            ranges.append({
+                "start": start, "end": f"{hour + 1:02d}:00", "average_price": None,
+                "hours": [], "manual": True, "approved": False,
+            })
+            if plan:
+                plan["ranges"] = sorted(
+                    [item for item in all_ranges if not item.get("manual")] + ranges,
+                    key=lambda item: item["start"],
+                )
+            else:
+                selling["plans"][date_key] = manual_plan(target, ranges)
+            selling["error"] = ""
+            await persist()
 
     async def approve_selling_range(call: ServiceCall) -> None:
         async with lock:
@@ -730,6 +819,11 @@ async def _async_start_manager(
         schema=vol.Schema({vol.Optional(key): object for key in SELLING_DEFAULTS}))
     hass.services.async_register(DOMAIN, "refresh_selling_plan", refresh_selling_plan,
         schema=vol.Schema({vol.Optional("day", default="tomorrow"): vol.In(("today", "tomorrow"))}))
+    hass.services.async_register(DOMAIN, "clear_selling_plans", clear_selling_plans)
+    hass.services.async_register(DOMAIN, "add_selling_range", add_selling_range,
+        schema=vol.Schema({
+            vol.Required("date"): str, vol.Required("start"): str,
+        }))
     hass.services.async_register(DOMAIN, "approve_selling_range", approve_selling_range,
         schema=vol.Schema({
             vol.Required("date"): str, vol.Required("start"): str, vol.Required("approved"): bool,
