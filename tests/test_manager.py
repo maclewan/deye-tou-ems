@@ -390,6 +390,25 @@ class RevenueCalculationTests(unittest.TestCase):
 
 
 class RevenueLedgerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_zero_net_export_rows_are_removed_on_startup(self):
+        hass = FakeHass({
+            "preset_schema": 2, "presets": {}, "assignments": {}, "auto_enabled": False,
+            "selling": {},
+            "revenue": {"settings": {}, "hours": {
+                "2026-10-25T12:00:00": {
+                    "hour": "2026-10-25T12:00:00", "net_exported_kwh": 0,
+                    "revenue_pln": 0,
+                },
+                "2026-10-25T13:00:00": {
+                    "hour": "2026-10-25T13:00:00", "net_exported_kwh": 1.5,
+                    "revenue_pln": 1,
+                },
+            }},
+        })
+        put_live(hass, sample_preset())
+        await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {}})
+        self.assertEqual(list(hass.saved["revenue"]["hours"]), ["2026-10-25T13:00:00"])
+
     async def test_completed_hour_is_saved_and_exposed_in_all_time_totals(self):
         hass = FakeHass()
         put_live(hass, sample_preset())

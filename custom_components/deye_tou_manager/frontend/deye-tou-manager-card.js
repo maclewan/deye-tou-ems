@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.6.2";
+const CARD_TRANSLATION_VERSION = "0.6.3";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -586,7 +586,7 @@ class DeyeTouSellingHistoryCard extends DeyeTouManagerCard {
     const groups = {};
     for (const record of Object.values(attributes?.revenue?.hours || {})) {
       const day = typeof record?.hour === "string" ? record.hour.slice(0, 10) : "";
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !(Number(record.net_exported_kwh) > 0)) continue;
       (groups[day] ||= []).push(record);
     }
     const days = Object.keys(groups).sort().reverse();

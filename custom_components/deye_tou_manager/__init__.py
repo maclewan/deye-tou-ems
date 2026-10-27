@@ -45,7 +45,7 @@ LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
-CARD_VERSION = "0.6.2"
+CARD_VERSION = "0.6.3"
 CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
 CARD_TRANSLATION_URL = "/api/deye_tou_manager/card-{language}.json"
@@ -437,14 +437,24 @@ async def _async_start_manager(
     for key, value in (revenue_entities or {}).items():
         if key in REVENUE_DEFAULTS:
             revenue_settings[key] = value
+    saved_hours = saved_revenue.get("hours") if isinstance(saved_revenue.get("hours"), dict) else {}
+
+    def has_positive_net_export(record: object) -> bool:
+        try:
+            return float(record.get("net_exported_kwh", 0)) > 0
+        except (AttributeError, TypeError, ValueError):
+            return True
+
     revenue = {
         "settings": revenue_settings,
-        "hours": saved_revenue.get("hours") if isinstance(saved_revenue.get("hours"), dict) else {},
+        "hours": {key: value for key, value in saved_hours.items()
+                  if has_positive_net_export(value)},
         "backfill_cursor": saved_revenue.get("backfill_cursor"),
         "backfill_done": bool(saved_revenue.get("backfill_done", False)),
         "error": saved_revenue.get("error", ""),
     }
     revenue_settings_changed = revenue_settings != saved_revenue.get("settings", {})
+    revenue_hours_changed = revenue["hours"] != saved_hours
     if selling_settings["mode"] == "off":
         for plan in selling["plans"].values():
             if isinstance(plan, dict):
@@ -460,7 +470,7 @@ async def _async_start_manager(
             "Deye Work Mode target changed from %s to %s; weekly schedule disabled",
             previous_entity, work_mode_entity,
         )
-    if (migrating or selling_settings_changed or revenue_settings_changed
+    if (migrating or selling_settings_changed or revenue_settings_changed or revenue_hours_changed
             or saved.get(CONF_WORK_MODE_ENTITY) != work_mode_entity
             or saved.get("auto_enabled") != auto_enabled):
         await store.async_save({
@@ -1103,7 +1113,8 @@ async def _async_start_manager(
                         recorded_value_at(import_states, hour + timedelta(hours=1)),
                         export_unit, import_unit, revenue_price_for_hour(price_states, hour),
                     )
-                    records[key] = {"hour": key, **values}
+                    if values["net_exported_kwh"] > 0:
+                        records[key] = {"hour": key, **values}
                 except RevenueError:
                     # Incomplete Recorder or RCE history is never estimated.
                     pass
