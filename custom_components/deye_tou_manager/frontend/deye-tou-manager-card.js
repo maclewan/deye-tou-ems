@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.6.0";
+const CARD_TRANSLATION_VERSION = "0.6.2";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -553,3 +553,70 @@ if (!customElements.get("deye-tou-selling-card"))
   customElements.define("deye-tou-selling-card", DeyeTouSellingCard);
 if (!window.customCards.some(card => card.type === "deye-tou-selling-card"))
   window.customCards.push({type:"deye-tou-selling-card",name:"Deye TOU Selling Planner",description:"Price-based selling plans and approvals"});
+
+class DeyeTouSellingHistoryCard extends DeyeTouManagerCard {
+  constructor() {
+    super();
+    this._historyDate = "";
+  }
+  getCardSize() { return 8; }
+  static getStubConfig() { return {type:"custom:deye-tou-selling-history-card"}; }
+  formatNumber(value, maximumFractionDigits = 3) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "—";
+    return new Intl.NumberFormat(this._language || "en", {
+      maximumFractionDigits, minimumFractionDigits: 0,
+    }).format(number);
+  }
+  rangeLabel(hour) {
+    const match = String(hour || "").match(/T(\d{2}):/);
+    if (!match) return "—";
+    const start = Number(match[1]);
+    const end = String((start + 1) % 24).padStart(2, "0");
+    return `${String(start).padStart(2, "0")}:00–${end}:00`;
+  }
+  render() {
+    if (!this._texts) {
+      this.shadowRoot.innerHTML = this._translationError
+        ? "<ha-card>Unable to load card translations. Check the integration installation.</ha-card>"
+        : '<ha-card aria-busy="true"></ha-card>';
+      return;
+    }
+    const attributes = this._hass?.states["sensor.deye_tou_preset_manager"]?.attributes;
+    const groups = {};
+    for (const record of Object.values(attributes?.revenue?.hours || {})) {
+      const day = typeof record?.hour === "string" ? record.hour.slice(0, 10) : "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      (groups[day] ||= []).push(record);
+    }
+    const days = Object.keys(groups).sort().reverse();
+    if (!days.includes(this._historyDate)) this._historyDate = days[0] || "";
+    const dayIndex = days.indexOf(this._historyDate);
+    const records = (groups[this._historyDate] || [])
+      .sort((left, right) => String(left.hour).localeCompare(String(right.hour)))
+      .slice(0, 24);
+    const nav = `<div class="history-nav"><button id="history-older" ${dayIndex < 0 || dayIndex >= days.length - 1 ? "disabled" : ""}>‹</button>
+      <b>${this.escape(this._historyDate || this.tr("historyNoRecords"))}</b>
+      <button id="history-newer" ${dayIndex <= 0 ? "disabled" : ""}>›</button></div>`;
+    const rows = records.map(record => `<tr><td>${this.rangeLabel(record.hour)}</td>
+      <td>${this.formatNumber(record.price_pln_per_kwh, 4)}</td>
+      <td>${this.formatNumber(record.net_exported_kwh)}</td>
+      <td>${this.formatNumber(record.revenue_pln)}</td></tr>`).join("");
+    this.shadowRoot.innerHTML = `<style>
+      :host{display:block;color:var(--primary-text-color)}ha-card{display:block;padding:20px;background:var(--card-background-color)}
+      h2{font-size:20px;margin:0 0 4px}.muted{font-size:13px;color:var(--secondary-text-color);line-height:1.5}
+      .history-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 10px}.history-nav b{text-align:center}
+      button{min-width:40px;min-height:36px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:default}
+      .scroll{overflow-x:auto}.history-table{width:100%;border-collapse:collapse;white-space:nowrap}.history-table th,.history-table td{padding:9px 7px;border-bottom:1px solid var(--divider-color);text-align:right;font-size:13px}.history-table th:first-child,.history-table td:first-child{text-align:left}.history-table th{color:var(--secondary-text-color);font-weight:600}
+    </style><ha-card><h2>${this.h("historyTitle")}</h2><p class="muted">${this.h("historySubtitle")}</p>
+      ${!attributes ? `<p class="muted">${this.h("missingSensor")}</p>` : !days.length ? `<p class="muted">${this.h("historyNoRecords")}</p>` : `${nav}<div class="scroll"><table class="history-table"><thead><tr><th>${this.h("historyHour")}</th><th>${this.h("historyPrice")}</th><th>${this.h("historyKwh")}</th><th>${this.h("historyRevenue")}</th></tr></thead><tbody>${rows}</tbody></table></div>`}
+    </ha-card>`;
+    const $ = id => this.shadowRoot.getElementById(id);
+    $("history-older")?.addEventListener("click", () => { this._historyDate = days[dayIndex + 1]; this.render(); });
+    $("history-newer")?.addEventListener("click", () => { this._historyDate = days[dayIndex - 1]; this.render(); });
+  }
+}
+if (!customElements.get("deye-tou-selling-history-card"))
+  customElements.define("deye-tou-selling-history-card", DeyeTouSellingHistoryCard);
+if (!window.customCards.some(card => card.type === "deye-tou-selling-history-card"))
+  window.customCards.push({type:"deye-tou-selling-history-card",name:"Deye TOU Selling History",description:"Hourly net export and revenue history"});

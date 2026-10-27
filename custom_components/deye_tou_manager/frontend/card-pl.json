@@ -117,5 +117,12 @@
   "sellingSource": "Źródło ceny",
   "sellingAverage": "Średnia",
   "sellingBelowThreshold": "Żadna godzina nie spełnia progu.",
-  "sellingApproved": "Zatwierdzony"
+  "sellingApproved": "Zatwierdzony",
+  "historyTitle": "Historia sprzedaży",
+  "historySubtitle": "Zmierzony godzinowy eksport netto i przychód według RCE. Jeden zapisany dzień na stronę.",
+  "historyNoRecords": "Brak zmierzonych zapisów przychodu.",
+  "historyHour": "Godzina",
+  "historyPrice": "Cena (PLN/kWh)",
+  "historyKwh": "Sprzedano (kWh)",
+  "historyRevenue": "Przychód (PLN)"
 }

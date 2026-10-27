@@ -117,5 +117,12 @@
   "sellingSource": "Price source",
   "sellingAverage": "Average",
   "sellingBelowThreshold": "No hours meet the threshold.",
-  "sellingApproved": "Approved"
+  "sellingApproved": "Approved",
+  "historyTitle": "Selling history",
+  "historySubtitle": "Measured hourly net export and RCE-priced revenue. One recorded day per page.",
+  "historyNoRecords": "No measured revenue records yet.",
+  "historyHour": "Hour",
+  "historyPrice": "Price (PLN/kWh)",
+  "historyKwh": "Sold (kWh)",
+  "historyRevenue": "Revenue (PLN)"
 }

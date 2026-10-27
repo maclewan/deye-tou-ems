@@ -115,7 +115,7 @@ assert.equal(card._editor.preset.slots[1].start, "05:00:00");
 assert.equal(firstEnd.textContent, "05:00");
 assert.equal(lastEnd.textContent, "00:00 (next day)");
 assert.equal(card.timeLabel("unavailable"), "—");
-assert.equal(window.customCards.length, 2);
+assert.equal(window.customCards.length, 3);
 const SellingCard = registry.get("deye-tou-selling-card");
 assert.ok(SellingCard, "selling card registers from the same dashboard resource");
 const sellingCard = new SellingCard();
@@ -139,6 +139,23 @@ assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-clear"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /id="selling-add-manual"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-control"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /minimum price filters only automatic price suggestions/);
+const HistoryCard = registry.get("deye-tou-selling-history-card");
+assert.ok(HistoryCard, "revenue history card registers from the same dashboard resource");
+const historyCard = new HistoryCard();
+historyCard._translationCache.en = english;
+historyCard.setConfig({});
+historyCard.hass = { states: {
+  "sensor.deye_tou_preset_manager": { attributes: {
+    revenue: { hours: {
+      "2026-10-25T23:00:00": {hour:"2026-10-25T23:00:00", price_pln_per_kwh:.75, net_exported_kwh:4, revenue_pln:3},
+      "2026-10-26T18:00:00": {hour:"2026-10-26T18:00:00", price_pln_per_kwh:1.2, net_exported_kwh:2.5, revenue_pln:3},
+    } },
+  } },
+} };
+assert.match(historyCard.shadowRoot.innerHTML, /Selling history/);
+assert.match(historyCard.shadowRoot.innerHTML, /2026-10-26/);
+assert.match(historyCard.shadowRoot.innerHTML, /18:00–19:00/);
+assert.match(historyCard.shadowRoot.innerHTML, /Sold \(kWh\)/);
 
 async function testRename() {
   const calls = [];
@@ -161,7 +178,7 @@ async function testRename() {
   assert.equal(card._editor.presetId, "stable-hash-id");
   assert.equal(card._pendingSavedName, null);
   global.fetch = async url => {
-    assert.match(url, /card-pl\.json\?v=0\.6\.0$/);
+    assert.match(url, /card-pl\.json\?v=0\.6\.2$/);
     return { ok: true, json: async () => polish };
   };
   card.hass = { ...card._hass, language: "pl" };
@@ -182,8 +199,8 @@ async function testRename() {
   const uncachedCard = new Card();
   uncachedCard.setConfig({});
   global.fetch = async url => {
-    if (/card-pl\.json\?v=0\.6\.0$/.test(url)) return { ok: false };
-    assert.match(url, /card-en\.json\?v=0\.6\.0$/);
+    if (/card-pl\.json\?v=0\.6\.2$/.test(url)) return { ok: false };
+    assert.match(url, /card-en\.json\?v=0\.6\.2$/);
     return { ok: true, json: async () => english };
   };
   uncachedCard.hass = { language: "pl", states: {} };

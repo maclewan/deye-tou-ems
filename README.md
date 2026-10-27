@@ -79,7 +79,7 @@ After UI setup or a YAML configuration check and restart, `sensor.deye_tou_prese
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.0
+/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.2
 ```
 
 If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
@@ -94,6 +94,12 @@ Add the separate energy-selling planner card wherever you want it:
 
 ```yaml
 type: custom:deye-tou-selling-card
+```
+
+Add the separate hourly revenue-history card to browse one recorded day at a time:
+
+```yaml
+type: custom:deye-tou-selling-history-card
 ```
 
 After a card update, refresh the browser. Storage-mode resource URLs are updated by the integration when needed; YAML-mode resource URLs remain your responsibility.
@@ -138,7 +144,7 @@ Physical selling is disabled by default. In the integration's **Configure** opti
 
 In the integration's **Configure** options, select the cumulative grid-export and grid-import energy sensors. At five seconds past every hour, the manager reads their Recorder history at both hour boundaries, calculates `max(0, exported − imported)`, and multiplies it by the corresponding hourly RCE price. Negative net export is ignored, as requested. Counter resets, incomplete meter readings, and missing RCE price history are skipped rather than guessed.
 
-The completed records are stored with the integration data and are included in the manager sensor's `revenue.hours` attribute for a future history card. The all-time totals are available immediately as:
+The completed records are stored with the integration data and are included in the manager sensor's `revenue.hours` attribute. Use `custom:deye-tou-selling-history-card` to browse one day at a time (up to 24 hourly rows), including the hour range, RCE price, sold net kWh, and revenue. The all-time totals are available immediately as:
 
 | Entity | Meaning |
 | --- | --- |
@@ -151,13 +157,12 @@ After the meters are configured, startup and each hourly run backfill one 31-day
 
 - Verify the physical selling behavior on the actual inverter before relying on it unattended. The optional TOU discharge-power override is not yet used.
 - Add Home Assistant notifications for proposed/approved plans; make the notification target configurable later.
-- Add a separate revenue/history card for the stored hourly records.
 
 ## Upgrading from the manual 0.3.0 installation
 
 1. Back up `/config/.storage/deye_tou_manager`.
 2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
-3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.0` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for both cards.
+3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.2` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for all three cards.
 4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
 
 The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged. This release migrates the preset and assignment format in that same storage file automatically; verify your presets and weekday assignments after restarting. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.
