@@ -79,7 +79,7 @@ After UI setup or a YAML configuration check and restart, `sensor.deye_tou_prese
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.3
+/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.4
 ```
 
 If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
@@ -144,7 +144,7 @@ Physical selling is disabled by default. In the integration's **Configure** opti
 
 In the integration's **Configure** options, select the cumulative grid-export and grid-import energy sensors. At five seconds past every hour, the manager reads their Recorder history at both hour boundaries, calculates `max(0, exported − imported)`, and multiplies it by the corresponding hourly RCE price. Zero or negative net export is ignored and is not retained in the history. Counter resets, incomplete meter readings, and missing RCE price history are skipped rather than guessed.
 
-The completed records are stored with the integration data and are included in the manager sensor's `revenue.hours` attribute. Use `custom:deye-tou-selling-history-card` to browse one day at a time (up to 24 hourly rows), including the hour range, RCE price, sold net kWh, and revenue. The all-time totals are available immediately as:
+The completed records are stored with the integration data and are included in the manager sensor's `revenue.hours` attribute. Use `custom:deye-tou-selling-history-card` to browse one day at a time (up to 24 hourly rows), including the hour range, RCE price, sold net kWh, and revenue. The card also displays the selected day's kWh/revenue sum and all-time revenue. The all-time totals are available immediately as:
 
 | Entity | Meaning |
 | --- | --- |
@@ -162,7 +162,7 @@ After the meters are configured, startup and each hourly run backfill one 31-day
 
 1. Back up `/config/.storage/deye_tou_manager`.
 2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
-3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.3` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for all three cards.
+3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.4` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for all three cards.
 4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
 
 The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged. This release migrates the preset and assignment format in that same storage file automatically; verify your presets and weekday assignments after restarting. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.

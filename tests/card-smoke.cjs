@@ -156,6 +156,8 @@ assert.match(historyCard.shadowRoot.innerHTML, /Selling history/);
 assert.match(historyCard.shadowRoot.innerHTML, /2026-10-26/);
 assert.match(historyCard.shadowRoot.innerHTML, /18:00–19:00/);
 assert.match(historyCard.shadowRoot.innerHTML, /Sold \(kWh\)/);
+assert.match(historyCard.shadowRoot.innerHTML, /Day total: 2\.5 kWh · 3 PLN/);
+assert.match(historyCard.shadowRoot.innerHTML, /All-time revenue: 6 PLN/);
 
 async function testRename() {
   const calls = [];
@@ -178,7 +180,7 @@ async function testRename() {
   assert.equal(card._editor.presetId, "stable-hash-id");
   assert.equal(card._pendingSavedName, null);
   global.fetch = async url => {
-    assert.match(url, /card-pl\.json\?v=0\.6\.3$/);
+    assert.match(url, /card-pl\.json\?v=0\.6\.4$/);
     return { ok: true, json: async () => polish };
   };
   card.hass = { ...card._hass, language: "pl" };
@@ -199,8 +201,8 @@ async function testRename() {
   const uncachedCard = new Card();
   uncachedCard.setConfig({});
   global.fetch = async url => {
-    if (/card-pl\.json\?v=0\.6\.3$/.test(url)) return { ok: false };
-    assert.match(url, /card-en\.json\?v=0\.6\.3$/);
+    if (/card-pl\.json\?v=0\.6\.4$/.test(url)) return { ok: false };
+    assert.match(url, /card-en\.json\?v=0\.6\.4$/);
     return { ok: true, json: async () => english };
   };
   uncachedCard.hass = { language: "pl", states: {} };

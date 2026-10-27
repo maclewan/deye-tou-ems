@@ -124,5 +124,7 @@
   "historyHour": "Hour",
   "historyPrice": "Price (PLN/kWh)",
   "historyKwh": "Sold (kWh)",
-  "historyRevenue": "Revenue (PLN)"
+  "historyRevenue": "Revenue (PLN)",
+  "historyDayTotal": "Day total",
+  "historyAllTimeRevenue": "All-time revenue"
 }

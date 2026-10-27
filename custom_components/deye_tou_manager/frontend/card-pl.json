@@ -124,5 +124,7 @@
   "historyHour": "Godzina",
   "historyPrice": "Cena (PLN/kWh)",
   "historyKwh": "Sprzedano (kWh)",
-  "historyRevenue": "Przychód (PLN)"
+  "historyRevenue": "Przychód (PLN)",
+  "historyDayTotal": "Suma dnia",
+  "historyAllTimeRevenue": "Przychód łącznie"
 }

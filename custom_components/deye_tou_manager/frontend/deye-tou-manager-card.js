@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.6.3";
+const CARD_TRANSLATION_VERSION = "0.6.4";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -595,6 +595,13 @@ class DeyeTouSellingHistoryCard extends DeyeTouManagerCard {
     const records = (groups[this._historyDate] || [])
       .sort((left, right) => String(left.hour).localeCompare(String(right.hour)))
       .slice(0, 24);
+    const sum = (items, field) => items.reduce((total, item) => {
+      const value = Number(item[field]);
+      return total + (Number.isFinite(value) ? value : 0);
+    }, 0);
+    const dayKwh = sum(records, "net_exported_kwh");
+    const dayRevenue = sum(records, "revenue_pln");
+    const allTimeRevenue = sum(Object.values(attributes?.revenue?.hours || {}), "revenue_pln");
     const nav = `<div class="history-nav"><button id="history-older" ${dayIndex < 0 || dayIndex >= days.length - 1 ? "disabled" : ""}>‹</button>
       <b>${this.escape(this._historyDate || this.tr("historyNoRecords"))}</b>
       <button id="history-newer" ${dayIndex <= 0 ? "disabled" : ""}>›</button></div>`;
@@ -607,9 +614,9 @@ class DeyeTouSellingHistoryCard extends DeyeTouManagerCard {
       h2{font-size:20px;margin:0 0 4px}.muted{font-size:13px;color:var(--secondary-text-color);line-height:1.5}
       .history-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 10px}.history-nav b{text-align:center}
       button{min-width:40px;min-height:36px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:default}
-      .scroll{overflow-x:auto}.history-table{width:100%;border-collapse:collapse;white-space:nowrap}.history-table th,.history-table td{padding:9px 7px;border-bottom:1px solid var(--divider-color);text-align:right;font-size:13px}.history-table th:first-child,.history-table td:first-child{text-align:left}.history-table th{color:var(--secondary-text-color);font-weight:600}
+      .scroll{overflow-x:auto}.history-table{width:100%;border-collapse:collapse;white-space:nowrap}.history-table th,.history-table td{padding:9px 7px;border-bottom:1px solid var(--divider-color);text-align:right;font-size:13px}.history-table th:first-child,.history-table td:first-child{text-align:left}.history-table th{color:var(--secondary-text-color);font-weight:600}.history-summary{margin-top:14px;padding-top:12px;border-top:1px solid var(--divider-color);display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;font-size:14px}.history-summary b{white-space:nowrap}
     </style><ha-card><h2>${this.h("historyTitle")}</h2><p class="muted">${this.h("historySubtitle")}</p>
-      ${!attributes ? `<p class="muted">${this.h("missingSensor")}</p>` : !days.length ? `<p class="muted">${this.h("historyNoRecords")}</p>` : `${nav}<div class="scroll"><table class="history-table"><thead><tr><th>${this.h("historyHour")}</th><th>${this.h("historyPrice")}</th><th>${this.h("historyKwh")}</th><th>${this.h("historyRevenue")}</th></tr></thead><tbody>${rows}</tbody></table></div>`}
+      ${!attributes ? `<p class="muted">${this.h("missingSensor")}</p>` : !days.length ? `<p class="muted">${this.h("historyNoRecords")}</p>` : `${nav}<div class="scroll"><table class="history-table"><thead><tr><th>${this.h("historyHour")}</th><th>${this.h("historyPrice")}</th><th>${this.h("historyKwh")}</th><th>${this.h("historyRevenue")}</th></tr></thead><tbody>${rows}</tbody></table></div><div class="history-summary"><b>${this.h("historyDayTotal")}: ${this.formatNumber(dayKwh)} kWh · ${this.formatNumber(dayRevenue)} PLN</b><b>${this.h("historyAllTimeRevenue")}: ${this.formatNumber(allTimeRevenue)} PLN</b></div>`}
     </ha-card>`;
     const $ = id => this.shadowRoot.getElementById(id);
     $("history-older")?.addEventListener("click", () => { this._historyDate = days[dayIndex + 1]; this.render(); });
