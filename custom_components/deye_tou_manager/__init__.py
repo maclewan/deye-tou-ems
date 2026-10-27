@@ -27,14 +27,19 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .preset import PresetError, validate_preset as validate_preset_data
-from .selling import SellingPlanError, make_sell_plan
+from .selling import SellingPlanError, hourly_prices, make_sell_plan
+from .revenue import RevenueError, measured_hour
 
 DOMAIN = "deye_tou_manager"
 ENTITY = "sensor.deye_tou_preset_manager"
+REVENUE_ENTITY = "sensor.deye_tou_selling_revenue_total"
+NET_EXPORT_ENTITY = "sensor.deye_tou_selling_net_export_total"
 CONF_WORK_MODE_ENTITY = "work_mode_entity"
 CONF_TODAY_PRICE_ENTITY = "today_price_entity"
 CONF_TOMORROW_PRICE_ENTITY = "tomorrow_price_entity"
 CONF_BATTERY_SOC_ENTITY = "battery_soc_entity"
+CONF_EXPORT_ENERGY_ENTITY = "export_energy_entity"
+CONF_IMPORT_ENERGY_ENTITY = "import_energy_entity"
 WORK_MODE_SUFFIX = "_system_work_mode"
 LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -52,6 +57,7 @@ SELLING_DEFAULTS = {
     "power_override": None, "today_price_entity": "", "tomorrow_price_entity": "",
     "battery_soc_entity": "", "control_enabled": False,
 }
+REVENUE_DEFAULTS = {CONF_EXPORT_ENERGY_ENTITY: "", CONF_IMPORT_ENERGY_ENTITY: ""}
 RCE_PRICE_UNIQUE_IDS = {
     "today": "rce_pse_today_price", "tomorrow": "rce_pse_tomorrow_price",
 }
@@ -143,6 +149,19 @@ def rce_price_entities(hass: HomeAssistant) -> dict[str, str]:
 def default_battery_soc_entity(work_mode_entity: str) -> str:
     """Return the Lewa-Reka BMS SOC sensor that shares the inverter prefix."""
     return f"sensor.{prefix_from_work_mode(work_mode_entity)}_battery_bms_soc"
+
+
+def energy_meter_candidates(hass: HomeAssistant) -> list[str]:
+    """Find cumulative energy sensors suitable for import/export accounting."""
+    candidates = []
+    for entity_id in hass.states.async_entity_ids("sensor"):
+        state = hass.states.get(entity_id)
+        attributes = state.attributes if state is not None else {}
+        if (attributes.get("device_class") == "energy"
+                and attributes.get("state_class") == "total_increasing"
+                and attributes.get("unit_of_measurement") in ("Wh", "kWh", "MWh")):
+            candidates.append(entity_id)
+    return sorted(candidates)
 
 
 def validate_selling_settings(data: dict, previous: dict | None = None) -> dict:
@@ -303,6 +322,10 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 CONF_TOMORROW_PRICE_ENTITY: settings.get(CONF_TOMORROW_PRICE_ENTITY, ""),
                 CONF_BATTERY_SOC_ENTITY: settings.get(CONF_BATTERY_SOC_ENTITY, ""),
             },
+            revenue_entities={
+                CONF_EXPORT_ENERGY_ENTITY: settings.get(CONF_EXPORT_ENERGY_ENTITY, ""),
+                CONF_IMPORT_ENERGY_ENTITY: settings.get(CONF_IMPORT_ENERGY_ENTITY, ""),
+            },
         )
     return True
 
@@ -321,6 +344,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 CONF_TODAY_PRICE_ENTITY: entry.options.get(CONF_TODAY_PRICE_ENTITY, ""),
                 CONF_TOMORROW_PRICE_ENTITY: entry.options.get(CONF_TOMORROW_PRICE_ENTITY, ""),
                 CONF_BATTERY_SOC_ENTITY: entry.options.get(CONF_BATTERY_SOC_ENTITY, ""),
+            },
+            revenue_entities={
+                CONF_EXPORT_ENERGY_ENTITY: entry.options.get(
+                    CONF_EXPORT_ENERGY_ENTITY, entry.data.get(CONF_EXPORT_ENERGY_ENTITY, "")
+                ),
+                CONF_IMPORT_ENERGY_ENTITY: entry.options.get(
+                    CONF_IMPORT_ENERGY_ENTITY, entry.data.get(CONF_IMPORT_ENERGY_ENTITY, "")
+                ),
             },
         )
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
@@ -342,11 +373,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime["unsub_start"]()
     runtime["unsub_selling_time"]()
     runtime["unsub_selling_tick"]()
+    runtime["unsub_revenue_hour"]()
     for service in ("save_current", "save_definition", "delete", "assign_day", "apply", "set_auto",
                     "set_selling_settings", "refresh_selling_plan", "clear_selling_plans",
                     "add_selling_range", "approve_selling_range"):
         hass.services.async_remove(DOMAIN, service)
     hass.states.async_remove(ENTITY)
+    hass.states.async_remove(REVENUE_ENTITY)
+    hass.states.async_remove(NET_EXPORT_ENTITY)
     hass.data.pop(DOMAIN)
     return True
 
@@ -354,6 +388,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_start_manager(
     hass: HomeAssistant, *, yaml_configured: bool, work_mode_entity: str,
     selling_price_entities: dict[str, str] | None = None,
+    revenue_entities: dict[str, str] | None = None,
 ) -> None:
     """Initialize the one shared manager for YAML or UI configuration."""
     prefix = prefix_from_work_mode(work_mode_entity)
@@ -397,6 +432,19 @@ async def _async_start_manager(
         "error": saved_selling.get("error", ""),
         "session": saved_selling.get("session") if isinstance(saved_selling.get("session"), dict) else None,
     }
+    saved_revenue = saved.get("revenue") if isinstance(saved.get("revenue"), dict) else {}
+    revenue_settings = {**REVENUE_DEFAULTS, **(saved_revenue.get("settings") or {})}
+    for key, value in (revenue_entities or {}).items():
+        if key in REVENUE_DEFAULTS:
+            revenue_settings[key] = value
+    revenue = {
+        "settings": revenue_settings,
+        "hours": saved_revenue.get("hours") if isinstance(saved_revenue.get("hours"), dict) else {},
+        "backfill_cursor": saved_revenue.get("backfill_cursor"),
+        "backfill_done": bool(saved_revenue.get("backfill_done", False)),
+        "error": saved_revenue.get("error", ""),
+    }
+    revenue_settings_changed = revenue_settings != saved_revenue.get("settings", {})
     if selling_settings["mode"] == "off":
         for plan in selling["plans"].values():
             if isinstance(plan, dict):
@@ -412,13 +460,13 @@ async def _async_start_manager(
             "Deye Work Mode target changed from %s to %s; weekly schedule disabled",
             previous_entity, work_mode_entity,
         )
-    if (migrating or selling_settings_changed
+    if (migrating or selling_settings_changed or revenue_settings_changed
             or saved.get(CONF_WORK_MODE_ENTITY) != work_mode_entity
             or saved.get("auto_enabled") != auto_enabled):
         await store.async_save({
             "preset_schema": 2, "presets": presets, "assignments": assignments,
             "auto_enabled": auto_enabled, "last_automatic": last_automatic,
-            "selling": selling,
+            "selling": selling, "revenue": revenue,
             CONF_WORK_MODE_ENTITY: work_mode_entity,
         })
     lock = asyncio.Lock()
@@ -444,6 +492,7 @@ async def _async_start_manager(
             "work_mode_entity": work_mode_entity,
             "last_automatic": last_automatic,
             "selling": copy.deepcopy(selling),
+            "revenue": copy.deepcopy(revenue),
             "rce_price_entities": {
                 **rce_price_entities(hass),
                 "today": selling_settings[CONF_TODAY_PRICE_ENTITY]
@@ -454,12 +503,35 @@ async def _async_start_manager(
             "ha_local_date": dt_util.now().date().isoformat(),
             "last_updated": datetime.now().isoformat(timespec="seconds"),
         })
+        def total(field: str) -> float:
+            values = []
+            for record in revenue["hours"].values():
+                try:
+                    value = float(record.get(field, 0))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    values.append(value)
+            return round(sum(values), 6)
+
+        total_revenue = total("revenue_pln")
+        total_kwh = total("net_exported_kwh")
+        hass.states.async_set(REVENUE_ENTITY, str(total_revenue), {
+            "friendly_name": "Deye TOU selling revenue total", "unit_of_measurement": "PLN",
+            "device_class": "monetary", "state_class": "total",
+            "hours_recorded": len(revenue["hours"]),
+        })
+        hass.states.async_set(NET_EXPORT_ENTITY, str(total_kwh), {
+            "friendly_name": "Deye TOU selling net export total", "unit_of_measurement": "kWh",
+            "device_class": "energy", "state_class": "total",
+            "hours_recorded": len(revenue["hours"]),
+        })
 
     async def persist() -> None:
         await store.async_save({
             "preset_schema": 2, "presets": presets, "assignments": assignments,
             "auto_enabled": auto_enabled, "last_automatic": last_automatic,
-            "selling": selling,
+            "selling": selling, "revenue": revenue,
             CONF_WORK_MODE_ENTITY: work_mode_entity,
         })
         publish()
@@ -953,6 +1025,129 @@ async def _async_start_manager(
                 selling["error"] = f"Selling start failed: {err}"
                 await persist()
 
+    def revenue_price_for_hour(price_states: list, hour: datetime) -> float:
+        """Find a Recorder-captured RCE price for an already completed hour."""
+        for state in reversed(price_states):
+            attributes = getattr(state, "attributes", {}) or {}
+            try:
+                prices = hourly_prices(
+                    attributes.get("prices"), hour.date(),
+                    attributes.get("unit_of_measurement"),
+                )
+                return prices[hour.hour]
+            except (SellingPlanError, KeyError, TypeError):
+                continue
+        raise RevenueError(f"No complete RCE price data recorded for {hour:%Y-%m-%d}")
+
+    def recorded_value_at(states: list, point: datetime) -> object:
+        """Return the most recently recorded state at or before a boundary."""
+        candidate = None
+        for state in states:
+            updated = getattr(state, "last_updated", None)
+            if updated is None:
+                continue
+            if point.tzinfo is not None and updated.tzinfo is None:
+                updated = updated.replace(tzinfo=point.tzinfo)
+            if updated <= point:
+                candidate = state
+            else:
+                break
+        if candidate is None:
+            raise RevenueError("No meter state was recorded at the hour boundary")
+        return candidate.state
+
+    async def recorder_history(start: datetime, end: datetime, entity_ids: list[str]) -> dict:
+        """Read Recorder in its executor; this integration never queries SQL directly."""
+        try:
+            from homeassistant.components.recorder import history
+            from functools import partial
+            return await hass.async_add_executor_job(partial(
+                history.get_significant_states, hass, start, end, entity_ids,
+                None, True, False, False, False,
+            ))
+        except Exception as err:
+            raise RevenueError(f"Recorder history is unavailable: {err}") from err
+
+    async def calculate_revenue_hours(start: datetime, end: datetime) -> int:
+        """Store every calculable whole-hour measured revenue record in a range."""
+        settings = copy.deepcopy(revenue["settings"])
+        export_entity, import_entity = (
+            settings[CONF_EXPORT_ENERGY_ENTITY], settings[CONF_IMPORT_ENERGY_ENTITY]
+        )
+        price_entity = selling["settings"][CONF_TODAY_PRICE_ENTITY] or rce_price_entities(hass).get("today", "")
+        if not export_entity or not import_entity or not price_entity:
+            raise RevenueError("Configure export, import, and RCE Price entities first")
+        histories = await recorder_history(start, end, [export_entity, import_entity, price_entity])
+        export_states, import_states = histories.get(export_entity, []), histories.get(import_entity, [])
+        price_states = histories.get(price_entity, [])
+        export_live = hass.states.get(export_entity)
+        import_live = hass.states.get(import_entity)
+        export_unit = ((export_states[0].attributes or {}).get("unit_of_measurement")
+                       if export_states else None) or getattr(
+                           export_live, "attributes", {}
+                       ).get("unit_of_measurement")
+        import_unit = ((import_states[0].attributes or {}).get("unit_of_measurement")
+                       if import_states else None) or getattr(
+                           import_live, "attributes", {}
+                       ).get("unit_of_measurement")
+        records = {}
+        hour = start.replace(minute=0, second=0, microsecond=0)
+        while hour + timedelta(hours=1) <= end:
+            key = hour.isoformat()
+            if key not in revenue["hours"]:
+                try:
+                    values = measured_hour(
+                        recorded_value_at(export_states, hour),
+                        recorded_value_at(export_states, hour + timedelta(hours=1)),
+                        recorded_value_at(import_states, hour),
+                        recorded_value_at(import_states, hour + timedelta(hours=1)),
+                        export_unit, import_unit, revenue_price_for_hour(price_states, hour),
+                    )
+                    records[key] = {"hour": key, **values}
+                except RevenueError:
+                    # Incomplete Recorder or RCE history is never estimated.
+                    pass
+            hour += timedelta(hours=1)
+        if records or revenue["error"]:
+            async with lock:
+                revenue["hours"].update(records)
+                revenue["error"] = ""
+                await persist()
+        return len(records)
+
+    async def backfill_revenue() -> None:
+        """Process one bounded historic batch each run, oldest data first over time."""
+        price_entity = selling["settings"][CONF_TODAY_PRICE_ENTITY] or rce_price_entities(hass).get("today", "")
+        if (revenue["backfill_done"] or not revenue["settings"][CONF_EXPORT_ENERGY_ENTITY]
+                or not revenue["settings"][CONF_IMPORT_ENERGY_ENTITY] or not price_entity):
+            return
+        now = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        cursor = revenue.get("backfill_cursor")
+        try:
+            end = datetime.fromisoformat(cursor) if cursor else now
+            if end.tzinfo is None and now.tzinfo is not None:
+                end = end.replace(tzinfo=now.tzinfo)
+            start_limit = datetime(2024, 1, 1, tzinfo=now.tzinfo)
+            start = max(start_limit, end - timedelta(days=31))
+            await calculate_revenue_hours(start, end)
+            async with lock:
+                revenue["backfill_cursor"] = start.isoformat()
+                revenue["backfill_done"] = start <= start_limit
+                await persist()
+        except RevenueError as err:
+            async with lock:
+                revenue["error"] = str(err)
+                await persist()
+
+    async def calculate_last_revenue_hour() -> None:
+        now = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        try:
+            await calculate_revenue_hours(now - timedelta(hours=1), now)
+        except RevenueError as err:
+            async with lock:
+                revenue["error"] = str(err)
+                await persist()
+
     async def approve_selling_range(call: ServiceCall) -> None:
         async with lock:
             if selling["settings"]["mode"] != "semi":
@@ -1075,10 +1270,16 @@ async def _async_start_manager(
     def at_start(_event) -> None:
         hass.async_create_task(run_scheduled("HA startup"))
         hass.async_create_task(selling_tick())
+        hass.async_create_task(backfill_revenue())
 
     @callback
     def at_selling_tick(_now) -> None:
         hass.async_create_task(selling_tick())
+
+    @callback
+    def at_revenue_hour(_now) -> None:
+        hass.async_create_task(calculate_last_revenue_hour())
+        hass.async_create_task(backfill_revenue())
 
     runtime["unsub_time"] = async_track_time_change(
         hass, at_midnight, hour=0, minute=0, second=15
@@ -1089,8 +1290,15 @@ async def _async_start_manager(
     runtime["unsub_selling_tick"] = async_track_time_interval(
         hass, at_selling_tick, timedelta(seconds=15)
     )
+    runtime["unsub_revenue_hour"] = async_track_time_change(
+        hass, at_revenue_hour, minute=0, second=5
+    )
     runtime["unsub_start"] = hass.bus.async_listen_once(
         EVENT_HOMEASSISTANT_STARTED, at_start
     )
     hass.data[DOMAIN] = runtime
     publish()
+    # A newly added or reconfigured entry is often set up after HA has already
+    # started, so it would otherwise wait until the next whole hour.
+    if getattr(hass, "is_running", False):
+        hass.async_create_task(backfill_revenue())

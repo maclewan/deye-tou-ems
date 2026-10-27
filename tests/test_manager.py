@@ -149,6 +149,7 @@ class FakeHass:
         self.midnight_callback = None
         self.evening_callback = None
         self.selling_tick_callback = None
+        self.revenue_hour_callback = None
         self.tasks = []
         self.http = SimpleNamespace(async_register_static_paths=self.register_paths)
         self.bus = SimpleNamespace(async_listen_once=self.listen_once)
@@ -174,6 +175,9 @@ class FakeHass:
         while self.tasks:
             await asyncio.gather(*self.tasks)
             self.tasks.clear()
+
+    async def async_add_executor_job(self, target):
+        return target()
 
 
 def load_integration():
@@ -205,7 +209,9 @@ def load_integration():
     modules["homeassistant.core"].callback = lambda method: method
     modules["homeassistant.exceptions"].HomeAssistantError = type("HomeAssistantError", (Exception,), {})
     def track_time(hass, callback, **kwargs):
-        field = "evening_callback" if kwargs.get("hour") == 18 else "midnight_callback"
+        field = ("evening_callback" if kwargs.get("hour") == 18 else
+                 "revenue_hour_callback" if kwargs.get("minute") == 0 and kwargs.get("second") == 5 else
+                 "midnight_callback")
         setattr(hass, field, callback)
         return lambda: setattr(hass, field, None)
     modules["homeassistant.helpers.event"].async_track_time_change = track_time
@@ -363,6 +369,75 @@ class PresetValidationTests(unittest.TestCase):
                     MANAGER.validate_preset(preset)
 
 
+class RevenueCalculationTests(unittest.TestCase):
+    def test_hour_uses_net_export_and_rce_price(self):
+        result = MANAGER.measured_hour(
+            "1234", "1240", "900", "902", "kWh", "kWh", 0.75,
+        )
+        self.assertEqual(result["exported_kwh"], 6.0)
+        self.assertEqual(result["imported_kwh"], 2.0)
+        self.assertEqual(result["net_exported_kwh"], 4.0)
+        self.assertEqual(result["revenue_pln"], 3.0)
+
+    def test_negative_net_export_is_ignored(self):
+        result = MANAGER.measured_hour(100, 101, 50, 53, "kWh", "kWh", 1.2)
+        self.assertEqual(result["net_exported_kwh"], 0.0)
+        self.assertEqual(result["revenue_pln"], 0.0)
+
+    def test_counter_reset_is_not_recorded(self):
+        with self.assertRaises(MANAGER.RevenueError):
+            MANAGER.measured_hour(100, 99, 50, 50, "kWh", "kWh", 1)
+
+
+class RevenueLedgerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completed_hour_is_saved_and_exposed_in_all_time_totals(self):
+        hass = FakeHass()
+        put_live(hass, sample_preset())
+        export, imported = "sensor.grid_export_total", "sensor.grid_import_total"
+        meter_attributes = {"unit_of_measurement": "kWh"}
+        hass.states.async_set(export, 106, meter_attributes)
+        hass.states.async_set(imported, 52, meter_attributes)
+        price_entity = put_rce_prices(hass, date(2026, 10, 25), "price", high_hour=23, high_price=750)
+        start = datetime(2026, 10, 25, 23)
+        end = start + timedelta(hours=1)
+        hass.history = {
+            export: [
+                SimpleNamespace(state="100", attributes=meter_attributes, last_updated=start),
+                SimpleNamespace(state="106", attributes=meter_attributes, last_updated=end),
+            ],
+            imported: [
+                SimpleNamespace(state="50", attributes=meter_attributes, last_updated=start),
+                SimpleNamespace(state="52", attributes=meter_attributes, last_updated=end),
+            ],
+            price_entity: [
+                SimpleNamespace(
+                    state="100", attributes=hass.states[price_entity].attributes,
+                    last_updated=start,
+                ),
+            ],
+        }
+        recorder = types.ModuleType("homeassistant.components.recorder")
+        history = types.ModuleType("homeassistant.components.recorder.history")
+        history.get_significant_states = lambda *_args: hass.history
+        recorder.history = history
+        with patch.dict(sys.modules, {
+            "homeassistant.components.recorder": recorder,
+            "homeassistant.components.recorder.history": history,
+        }):
+            await MANAGER.async_setup(hass, {MANAGER.DOMAIN: {
+                MANAGER.CONF_TODAY_PRICE_ENTITY: price_entity,
+                MANAGER.CONF_EXPORT_ENERGY_ENTITY: export,
+                MANAGER.CONF_IMPORT_ENERGY_ENTITY: imported,
+            }})
+            hass.revenue_hour_callback(None)
+            await hass.finish_tasks()
+        self.assertEqual(hass.states[MANAGER.REVENUE_ENTITY].state, "3.0")
+        self.assertEqual(hass.states[MANAGER.NET_EXPORT_ENTITY].state, "4.0")
+        records = hass.saved["revenue"]["hours"]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(next(iter(records.values()))["price_pln_per_kwh"], 0.75)
+
+
 class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_user_selects_detected_inverter(self):
         flow = CONFIG_FLOW.DeyeTouManagerConfigFlow()
@@ -372,7 +447,11 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await flow.async_step_user())["type"], "form")
         self.assertEqual(await flow.async_step_user({MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode"}), {
             "type": "create_entry", "title": "Deye TOU Preset Manager",
-            "data": {MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode"},
+            "data": {
+                MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode",
+                MANAGER.CONF_EXPORT_ENERGY_ENTITY: "",
+                MANAGER.CONF_IMPORT_ENERGY_ENTITY: "",
+            },
         })
 
     async def test_no_candidate_aborts_setup(self):
@@ -391,7 +470,11 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(await flow.async_step_user({MANAGER.CONF_WORK_MODE_ENTITY: entity_id}), {
             "type": "create_entry", "title": "Deye TOU Preset Manager",
-            "data": {MANAGER.CONF_WORK_MODE_ENTITY: entity_id},
+            "data": {
+                MANAGER.CONF_WORK_MODE_ENTITY: entity_id,
+                MANAGER.CONF_EXPORT_ENERGY_ENTITY: "",
+                MANAGER.CONF_IMPORT_ENERGY_ENTITY: "",
+            },
         })
 
     async def test_options_choose_new_inverter(self):
@@ -406,6 +489,8 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
             MANAGER.CONF_TODAY_PRICE_ENTITY: "",
             MANAGER.CONF_TOMORROW_PRICE_ENTITY: "",
             MANAGER.CONF_BATTERY_SOC_ENTITY: "sensor.new_battery_bms_soc",
+            MANAGER.CONF_EXPORT_ENERGY_ENTITY: "",
+            MANAGER.CONF_IMPORT_ENERGY_ENTITY: "",
         }), {
             "type": "create_entry", "title": "",
             "data": {
@@ -413,6 +498,8 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
                 MANAGER.CONF_TODAY_PRICE_ENTITY: "",
                 MANAGER.CONF_TOMORROW_PRICE_ENTITY: "",
                 MANAGER.CONF_BATTERY_SOC_ENTITY: "sensor.new_battery_bms_soc",
+                MANAGER.CONF_EXPORT_ENERGY_ENTITY: "",
+                MANAGER.CONF_IMPORT_ENERGY_ENTITY: "",
             },
         })
 
@@ -430,10 +517,33 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
             MANAGER.CONF_TODAY_PRICE_ENTITY: today,
             MANAGER.CONF_TOMORROW_PRICE_ENTITY: tomorrow,
             MANAGER.CONF_BATTERY_SOC_ENTITY: "sensor.new_battery_bms_soc",
+            MANAGER.CONF_EXPORT_ENERGY_ENTITY: "",
+            MANAGER.CONF_IMPORT_ENERGY_ENTITY: "",
         })
         self.assertEqual(result["type"], "create_entry")
         self.assertEqual(result["data"][MANAGER.CONF_TODAY_PRICE_ENTITY], today)
         self.assertEqual(result["data"][MANAGER.CONF_TOMORROW_PRICE_ENTITY], tomorrow)
+
+    async def test_setup_can_select_cumulative_energy_meters(self):
+        flow = CONFIG_FLOW.DeyeTouManagerConfigFlow()
+        flow.hass = FakeHass()
+        put_live(flow.hass, sample_preset(), prefix="my_deye")
+        export = "sensor.grid_export_total"
+        imported = "sensor.grid_import_total"
+        attributes = {
+            "device_class": "energy", "state_class": "total_increasing",
+            "unit_of_measurement": "kWh",
+        }
+        flow.hass.states.async_set(export, 100, attributes)
+        flow.hass.states.async_set(imported, 50, attributes)
+        result = await flow.async_step_user({
+            MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode",
+            MANAGER.CONF_EXPORT_ENERGY_ENTITY: export,
+            MANAGER.CONF_IMPORT_ENERGY_ENTITY: imported,
+        })
+        self.assertEqual(result["type"], "create_entry")
+        self.assertEqual(result["data"][MANAGER.CONF_EXPORT_ENERGY_ENTITY], export)
+        self.assertEqual(result["data"][MANAGER.CONF_IMPORT_ENERGY_ENTITY], imported)
 
 
 class ResourceAndSetupTests(unittest.IsolatedAsyncioTestCase):

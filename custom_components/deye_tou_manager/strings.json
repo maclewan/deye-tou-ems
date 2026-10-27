@@ -8,7 +8,9 @@
           "work_mode_entity": "Inverter Work Mode entity",
           "today_price_entity": "RCE PSE Price entity",
           "tomorrow_price_entity": "RCE PSE Price Tomorrow entity",
-          "battery_soc_entity": "Battery SOC sensor (normally sensor.<inverter prefix>_battery_bms_soc)"
+          "battery_soc_entity": "Battery SOC sensor (normally sensor.<inverter prefix>_battery_bms_soc)",
+          "export_energy_entity": "Grid export energy meter (cumulative)",
+          "import_energy_entity": "Grid import energy meter (cumulative)"
         }
       }
     },
@@ -27,7 +29,9 @@
           "work_mode_entity": "Inverter Work Mode entity",
           "today_price_entity": "RCE PSE Price entity (automatic detection when empty)",
           "tomorrow_price_entity": "RCE PSE Price Tomorrow entity (automatic detection when empty)",
-          "battery_soc_entity": "Battery SOC sensor (normally sensor.<inverter prefix>_battery_bms_soc)"
+          "battery_soc_entity": "Battery SOC sensor (normally sensor.<inverter prefix>_battery_bms_soc)",
+          "export_energy_entity": "Grid export energy meter (cumulative; Wh, kWh, or MWh)",
+          "import_energy_entity": "Grid import energy meter (cumulative; Wh, kWh, or MWh)"
         }
       }
     },

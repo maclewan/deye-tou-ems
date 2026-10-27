@@ -8,9 +8,12 @@ from . import (
     CONF_TODAY_PRICE_ENTITY,
     CONF_TOMORROW_PRICE_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
+    CONF_EXPORT_ENERGY_ENTITY,
+    CONF_IMPORT_ENERGY_ENTITY,
     CONF_WORK_MODE_ENTITY,
     DOMAIN,
     default_battery_soc_entity,
+    energy_meter_candidates,
     rce_price_entities,
     work_mode_candidates,
 )
@@ -21,13 +24,20 @@ class DeyeTouManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         candidates = work_mode_candidates(self.hass)
+        energy_meters = [""] + energy_meter_candidates(self.hass)
         if not candidates:
             return self.async_abort(reason="no_compatible_entities")
         if user_input is not None:
-            if user_input[CONF_WORK_MODE_ENTITY] in candidates:
+            if (user_input[CONF_WORK_MODE_ENTITY] in candidates
+                    and user_input.get(CONF_EXPORT_ENERGY_ENTITY, "") in energy_meters
+                    and user_input.get(CONF_IMPORT_ENERGY_ENTITY, "") in energy_meters):
                 return self.async_create_entry(
                     title="Deye TOU Preset Manager",
-                    data={CONF_WORK_MODE_ENTITY: user_input[CONF_WORK_MODE_ENTITY]},
+                    data={
+                        CONF_WORK_MODE_ENTITY: user_input[CONF_WORK_MODE_ENTITY],
+                        CONF_EXPORT_ENERGY_ENTITY: user_input.get(CONF_EXPORT_ENERGY_ENTITY, ""),
+                        CONF_IMPORT_ENERGY_ENTITY: user_input.get(CONF_IMPORT_ENERGY_ENTITY, ""),
+                    },
                 )
             errors = {"base": "invalid_entity"}
         else:
@@ -37,7 +47,11 @@ class DeyeTouManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if len(candidates) == 1 else vol.Required(CONF_WORK_MODE_ENTITY)
         )
         return self.async_show_form(
-            step_id="user", data_schema=vol.Schema({key: vol.In(candidates)}),
+            step_id="user", data_schema=vol.Schema({
+                key: vol.In(candidates),
+                vol.Required(CONF_EXPORT_ENERGY_ENTITY, default=""): vol.In(energy_meters),
+                vol.Required(CONF_IMPORT_ENERGY_ENTITY, default=""): vol.In(energy_meters),
+            }),
             errors=errors,
         )
 
@@ -63,6 +77,7 @@ class DeyeTouManagerOptionsFlow(config_entries.OptionsFlow):
         if not candidates:
             return self.async_abort(reason="no_compatible_entities")
         price_entities = rce_price_entities(self.hass)
+        energy_meters = [""] + energy_meter_candidates(self.hass)
         today_prices = ["", price_entities.get("today", "")]
         tomorrow_prices = ["", price_entities.get("tomorrow", "")]
         battery_default = self.config_entry.options.get(
@@ -75,11 +90,22 @@ class DeyeTouManagerOptionsFlow(config_entries.OptionsFlow):
             configured = self.config_entry.options.get(current_key, "")
             if configured and configured not in values:
                 values.append(configured)
+        energy_values = {}
+        for key in (CONF_EXPORT_ENERGY_ENTITY, CONF_IMPORT_ENERGY_ENTITY):
+            configured = self.config_entry.options.get(
+                key, self.config_entry.data.get(key, "")
+            )
+            values = energy_meters.copy()
+            if configured and configured not in values:
+                values.append(configured)
+            energy_values[key] = values
         if user_input is not None:
             battery_soc = user_input.get(CONF_BATTERY_SOC_ENTITY, "")
             if (user_input[CONF_WORK_MODE_ENTITY] in candidates
                     and user_input[CONF_TODAY_PRICE_ENTITY] in today_prices
                     and user_input[CONF_TOMORROW_PRICE_ENTITY] in tomorrow_prices
+                    and user_input[CONF_EXPORT_ENERGY_ENTITY] in energy_values[CONF_EXPORT_ENERGY_ENTITY]
+                    and user_input[CONF_IMPORT_ENERGY_ENTITY] in energy_values[CONF_IMPORT_ENERGY_ENTITY]
                     and isinstance(battery_soc, str) and battery_soc.startswith("sensor.")):
                 return self.async_create_entry(title="", data={
                     **user_input, CONF_BATTERY_SOC_ENTITY: battery_soc,
@@ -98,6 +124,12 @@ class DeyeTouManagerOptionsFlow(config_entries.OptionsFlow):
                     CONF_TOMORROW_PRICE_ENTITY, price_entities.get("tomorrow", "")
                 )): vol.In(tomorrow_prices),
                 vol.Required(CONF_BATTERY_SOC_ENTITY, default=battery_default): str,
+                vol.Required(CONF_EXPORT_ENERGY_ENTITY, default=self.config_entry.options.get(
+                    CONF_EXPORT_ENERGY_ENTITY, self.config_entry.data.get(CONF_EXPORT_ENERGY_ENTITY, "")
+                )): vol.In(energy_values[CONF_EXPORT_ENERGY_ENTITY]),
+                vol.Required(CONF_IMPORT_ENERGY_ENTITY, default=self.config_entry.options.get(
+                    CONF_IMPORT_ENERGY_ENTITY, self.config_entry.data.get(CONF_IMPORT_ENERGY_ENTITY, "")
+                )): vol.In(energy_values[CONF_IMPORT_ENERGY_ENTITY]),
             }),
             errors=errors,
         )
