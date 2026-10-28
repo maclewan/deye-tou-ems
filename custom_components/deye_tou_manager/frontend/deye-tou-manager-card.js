@@ -425,6 +425,13 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     const selling = attributes?.selling;
     const settings = this._settingsDraft || selling?.settings || {};
     const dryRun = settings.dry_run !== false;
+    const settingKeys = ["mode", "dry_run", "threshold", "max_ranges", "time_of_day", "min_soc", "power_override"];
+    const savedSettings = selling?.settings || {};
+    const settingsDirty = Boolean(this._settingsDraft) && settingKeys.some(key => {
+      const current = settings[key] ?? (key === "dry_run" ? true : null);
+      const saved = savedSettings[key] ?? (key === "dry_run" ? true : null);
+      return current !== saved;
+    });
     const detected = attributes?.rce_price_entities || {};
     const dateKeyFor = day => {
       const date = new Date(`${attributes?.ha_local_date || new Date().toISOString().slice(0,10)}T12:00:00`);
@@ -468,18 +475,18 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     </div><div class="actions"><button class="primary" id="selling-add-manual">${this.h("sellingAddManualButton")}</button><button id="selling-manual-cancel">${this.h("sellingCancel")}</button></div>
     <p class="muted">${this.h("sellingManualFormNote")}</p></section></div>` : "";
     this.shadowRoot.innerHTML = `<style>
-      ha-card{padding:20px;color:var(--primary-text-color);background:var(--card-background-color)}ha-card.dry-run{background:var(--secondary-background-color)}ha-card.live-control{background:rgba(244,67,54,.08);border:1px solid var(--error-color)}h2,h3{margin:0 0 10px}h3{font-size:16px}
+      ha-card{padding:20px;color:var(--primary-text-color);background:var(--card-background-color)}ha-card.dry-run{background:rgba(83,111,137,.13);border:1px solid rgba(83,111,137,.45)}ha-card.live-control{background:rgba(46,125,50,.12);border:1px solid rgba(46,125,50,.6)}h2,h3{margin:0 0 10px}h3{font-size:16px}
       .header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
       .muted{color:var(--secondary-text-color);font-size:13px;line-height:1.5}
       .warning{color:var(--warning-color);font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
       label{display:flex;flex-direction:column;gap:5px;font-size:13px}input,select,button{font:inherit;min-height:38px;box-sizing:border-box}
       input,select{width:100%;padding:7px;border:1px solid var(--divider-color);border-radius:7px;background:var(--card-background-color);color:var(--primary-text-color)}
       button{border:1px solid var(--divider-color);border-radius:7px;padding:7px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);cursor:pointer}
-      button.primary{background:var(--primary-color);color:var(--text-primary-color);border:0}
+      button.primary{background:var(--primary-color);color:var(--text-primary-color);border:0}button.primary.pending{background:#2e7d32;box-shadow:0 0 0 3px rgba(46,125,50,.3);font-weight:700}
       .actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.range{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--divider-color);padding:10px;border-radius:8px;margin:7px 0}.range-soc{max-width:150px}.stop{border-color:var(--error-color);color:var(--error-color)}
       .range small{width:100%;color:var(--secondary-text-color)}section{border-top:1px solid var(--divider-color);padding-top:14px;margin-top:14px}
       .approval{flex-direction:row;align-items:center;margin-top:12px}.approval input{width:18px;min-height:18px}
-      .dry-run-toggle{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:10px;padding:14px;border:2px solid var(--divider-color);border-radius:9px;font-weight:700;font-size:15px;background:var(--secondary-background-color)}.dry-run-toggle input{width:22px;min-height:22px}.dry-run-toggle.live{border-color:var(--error-color);background:rgba(244,67,54,.13);color:var(--primary-text-color)}
+      .dry-run-toggle{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:10px;padding:14px;border:2px solid rgba(83,111,137,.55);border-radius:9px;font-weight:700;font-size:15px;background:rgba(83,111,137,.12)}.dry-run-toggle input{width:22px;min-height:22px}.dry-run-toggle.live{border-color:rgba(46,125,50,.7);background:rgba(46,125,50,.12);color:var(--primary-text-color)}.live-control .warning{color:#2e7d32}.dry-run .warning{color:#526f89}
       .language-picker{display:flex;flex-direction:row;align-items:center}.language-picker select{width:auto;min-height:32px}
       .modal-backdrop{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45)}.manual-modal{width:min(460px,100%);margin:0;padding:18px;border:0;border-radius:10px;background:var(--card-background-color);box-shadow:var(--ha-card-box-shadow,0 2px 12px rgba(0,0,0,.35))}
       #status{min-height:18px;font-size:12px;color:var(--success-color)}#status.error{color:var(--error-color)}
@@ -498,7 +505,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
         ${select("sell-period","sellingPeriod",settings.time_of_day,[["morning","sellingMorning"],["afternoon","sellingAfternoon"],["evening","sellingEvening"],["any","sellingAny"]])}
         ${field("sell-soc","sellingMinSoc","number",settings.min_soc,'min="0" max="100" step="1"')}
         ${field("sell-power","sellingPower","number",settings.power_override,'min="1" max="12000" step="1"')}
-      </div><div class="actions"><button class="primary" id="sell-save">${this.h("sellingSave")}</button>
+      </div><div class="actions"><button class="primary ${settingsDirty ? "pending" : ""}" id="sell-save">${this.h("sellingSave")}</button>
         <button id="sell-check-today">${this.h("sellingCheckToday")}</button>
         <button id="sell-check-tomorrow">${this.h("sellingCheckTomorrow")}</button>
         <button id="sell-clear">${this.h("sellingClear")}</button></div>
@@ -516,19 +523,23 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       try { window.localStorage?.setItem(CARD_LANGUAGE_KEY, this._languageChoice); } catch (_) { /* unavailable */ }
       this.updateLanguage(); this.render();
     });
-    const ids = ["sell-mode","sell-dry-run","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power"];
+    const ids = ["sell-mode","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power"];
     const readSettings = () => ({
       mode:$("sell-mode").value, dry_run:$("sell-dry-run").checked,
       threshold:Number($("sell-threshold").value),
       max_ranges:Number($("sell-ranges").value), time_of_day:$("sell-period").value,
       min_soc:Number($("sell-soc").value), power_override:$("sell-power").value === "" ? null : Number($("sell-power").value)
     });
-    ids.forEach(id => $(id)?.addEventListener("change", () => { this._settingsDraft = readSettings(); }));
+    const updateDraft = () => {
+      this._settingsDraft = readSettings();
+      this.render();
+    };
+    ids.forEach(id => $(id)?.addEventListener("change", updateDraft));
     $("sell-dry-run")?.addEventListener("change", event => {
       if (!event.target.checked && !window.confirm(this.tr("sellingLiveControlConfirm"))) {
         event.target.checked = true;
-        this._settingsDraft = readSettings();
       }
+      updateDraft();
     });
     $("sell-save")?.addEventListener("click", async () => {
       const next = readSettings();

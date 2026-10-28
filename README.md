@@ -6,19 +6,15 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](#installation)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Home Assistant custom integration and dashboard card for managing named, six-slot Deye Time of Use (TOU) presets. It uses the existing entities from [Lewa-Reka's ESPHome Deye integration](https://github.com/Lewa-Reka/esphome-deye-inverter); it does not open another Modbus connection or use Deye Cloud.
+A Home Assistant integration and dashboard cards for Deye inverters exposed by [Lewa-Reka's ESPHome Deye integration](https://github.com/Lewa-Reka/esphome-deye-inverter). It uses those existing entities—no second Modbus connection or Deye Cloud account is needed.
 
-## Features
+## Three things it does
 
-- Save the inverter's current TOU settings as a named preset.
-- Create, rename, edit, duplicate, and delete presets in Home Assistant without changing the inverter.
-- Assign a different preset to each weekday.
-- Select the Lewa-Reka ESPHome inverter during setup; entity IDs are derived from its Work Mode entity.
-- Apply a preset manually, or enable the built-in schedule for 00:00:15 and Home Assistant startup.
-- Wait up to three minutes for ESPHome after startup and skip scheduled writes when the active settings already match.
-- Calculate measured hourly net export and RCE-priced revenue from selected cumulative grid meters.
+1. **Manage TOU presets** — save the inverter's six-slot TOU configuration, edit named presets safely, and assign one preset to each weekday. Apply a preset manually or use the optional weekly schedule.
+2. **Plan battery selling** — use RCE PSE prices to find profitable one-hour selling periods, add manual periods, set a target SOC per period, and approve each period. Plans begin in **Dry run** mode, so they cannot change the inverter until you explicitly turn it off.
+3. **Estimate daily revenue** — calculate measured hourly net export from cumulative grid meters, combine it with RCE prices, and browse daily kWh, revenue, and action history in separate cards.
 
-Only **Apply** and the enabled schedule write to the inverter. The schedule is off by default for a new installation.
+The weekly schedule is off by default. Only **Apply**, the enabled schedule, or selling with Dry run turned off can write to the inverter.
 
 ## Requirements
 
@@ -48,13 +44,13 @@ The slot voltage entities and the inverter's global Battery Grid Charging permis
 3. Find **Deye TOU Manager** in HACS and install it.
 4. Restart Home Assistant, then open **Settings → Devices & services → Add integration**, search for **Deye TOU Preset Manager**, and choose the inverter's Work Mode entity.
 
-HACS installs files under `custom_components/deye_tou_manager`. The setup flow activates the manager without editing `configuration.yaml`, and installs/updates the shared card resource automatically. See [HACS custom repositories](https://www.hacs.xyz/docs/faq/custom_repositories/) for the current HACS interface.
+HACS installs the integration and registers the shared card resource automatically. No YAML is needed.
 
 ## Configuration
 
-Set up the integration through **Settings → Devices & services → Add integration → Deye TOU Preset Manager**. Choose the Lewa-Reka ESPHome inverter's `select.…_system_work_mode` entity, then optionally select cumulative grid-export and grid-import energy meters. The setup lists only live `energy` / `total_increasing` sensors with Wh, kWh, or MWh units. The integration uses the Work Mode prefix for all TOU controls and does not change inverter settings during setup. If more than one compatible Work Mode entity exists, choose the intended inverter carefully. You can change it later under the integration's **Configure** options; doing so reloads the manager. Changing the target disables the weekly schedule until you review and re-enable it.
+Add **Deye TOU Preset Manager** in **Settings → Devices & services** and choose your inverter's Work Mode entity. Optionally select grid export/import meters for revenue estimates. You can change these later in **Configure**.
 
-After setup and restart, `sensor.deye_tou_preset_manager` exposes presets, weekday assignments, selling plans, and revenue data.
+After setup, `sensor.deye_tou_preset_manager` contains the integration data.
 
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
@@ -88,9 +84,13 @@ type: custom:deye-tou-action-log-card
 
 After a card update, refresh the browser.
 
-## Usage
+## Quick use
 
-The compact section at the top shows the inverter's **live** Work Mode, Solar Sell, TOU, and six slot readings in a single vertical list; it is read-only. Each slot shows its start and calculated end time. The editor also shows a read-only end-time column that updates when you change a start time. A slot ends when the next one starts; the sixth ends at the first slot's start on the next day. Selecting a saved preset opens its full editor by default. Edit its name or settings offline, duplicate it, start a blank preset, or capture the inverter's current values as a new preset. Renaming retains weekday assignments. Assign presets to weekdays and use **Apply to Deye** to apply one manually. Turn on **Enable weekly schedule** only after checking the assignments. The card shows the latest automatic result. The card follows Home Assistant's language by default (English or Polish); its **Language** selector can override that choice and remembers it in the browser.
+- **TOU:** save the current inverter plan, edit or create a preset, assign it to weekdays, then apply it or enable the weekly schedule.
+- **Selling:** configure RCE PSE prices and battery SOC, check a plan, approve the periods you want, and leave **Dry run** on until you are ready for live control.
+- **Revenue:** configure cumulative export and import energy meters, then add the revenue-history card.
+
+For detailed behavior, safety rules, selling planning, and revenue calculation, see [Advanced usage and safety](docs/advanced-usage.md).
 
 The integration also registers these Home Assistant actions:
 
@@ -102,52 +102,29 @@ The integration also registers these Home Assistant actions:
 | `deye_tou_manager.assign_day` | Assign or clear a weekday preset | No |
 | `deye_tou_manager.set_auto` | Enable or disable the built-in schedule | No immediate write |
 | `deye_tou_manager.apply` | Apply a preset to the inverter | Yes |
-| `deye_tou_manager.set_selling_settings` | Configure selling and its physical-control opt-in | No immediate write |
+| `deye_tou_manager.set_selling_settings` | Configure selling and Dry run | No immediate write |
 | `deye_tou_manager.refresh_selling_plan` | Recalculate today's or tomorrow's plan | No |
-| `deye_tou_manager.approve_selling_range` | Approve or unapprove one semi-automatic selling hour | May start selling when its period is active and control is enabled |
+| `deye_tou_manager.approve_selling_range` | Approve or unapprove one semi-automatic selling hour | May start selling when its period is active and Dry run is off |
 | `deye_tou_manager.set_selling_range_soc` | Set one period's stop SOC | No |
 | `deye_tou_manager.stop_selling` | Stop the active period and restore the prior settings | Yes |
 | `deye_tou_manager.restart_selling` | Restart a completed period during its original hour | Yes |
 
-Presets, selling plans, and revenue records are stored by Home Assistant in `/config/.storage/deye_tou_manager`. Presets use stable SHA-256 keys while names remain editable labels; weekday assignments reference those keys. Do not edit the live storage file by hand. To rename through `save_definition`, pass the preset ID from the manager sensor's `preset_ids` attribute as `preset_id` with the new `name`.
-
-### Apply behavior and safety
-
-Before an apply, the integration checks the six slots and all TOU switch states. It turns main TOU off, writes Work Mode, Solar Sell, six slots, and all seven day switches, waits for matching ESPHome readings, then re-enables main TOU. If a write or readback fails, it tries to leave main TOU off. Check the inverter readings and Home Assistant logs before turning TOU on manually.
-
-Readback waits for up to 30 seconds. Slow ESPHome updates can therefore report a failure even if the inverter later accepts the settings. **Selling First** with TOU can allow battery export; review Work Mode and Solar Sell before applying a preset or enabling the schedule.
-
-The schedule uses Home Assistant local time. Manual and scheduled applies share a lock, so they cannot write concurrently.
+Data is stored by Home Assistant. Do not edit the storage file manually; see [Advanced usage and safety](docs/advanced-usage.md#stored-data) for details.
 
 ## Energy selling
 
-The separate `custom:deye-tou-selling-card` uses the Lewa-Reka [RCE PSE integration](https://github.com/Lewa-Reka/ha-rce-pse). In **Settings → Devices & services → Deye TOU Preset Manager → Configure**, select the RCE PSE **Price** and **Price Tomorrow** entities. The detected RCE PSE entities are preselected; choose the blank option to use automatic detection after a later RCE PSE setup. Entity selection uses the integration's stable IDs, so it works regardless of the Home Assistant display language. The planner reads a complete day's 15-minute records, converts the sensor's PLN/MWh or PLN/kWh unit to PLN/kWh, computes hourly mean prices, and selects up to the configured number of highest-priced **one-hour** blocks above the minimum price. It can limit candidates to morning, afternoon, evening (16:00–24:00), or any time. When planning today, periods that have already started are excluded. Pressing **Check today** or **Check tomorrow** first saves all displayed planner settings, then calculates using them. Incomplete or inconsistent price data is rejected, including duplicate local times on a daylight-saving transition day.
+Use `custom:deye-tou-selling-card` to plan and approve hourly selling periods. It starts in Dry run mode. See [Advanced usage and safety](docs/advanced-usage.md#selling-planner) before turning on live control.
 
-Choose Off, semi-automatic approval, or automatic approval in the card. At 18:00 Home Assistant local time the manager plans tomorrow; at 00:00:15 it recalculates today. Each selected one-hour block has its own approval and a target SOC. It defaults to the global minimum SOC, but can be changed per block before it starts. Automatic mode approves every valid block during the midnight recheck. Semi-automatic mode requires each checkbox to be approved separately. An unchanged block retains its approval, while changed settings, changed prices, or missing price data revoke it. **Add manual selling hour** in either day's plan opens a dialog for the one-hour start time and target SOC; start times are limited to `:00`, `:15`, `:30`, or `:45`. It still has an individual approval and survives price checks. **Clear findings** removes both calculated and manual hours.
+## Revenue
 
-Physical selling starts in **Dry run** mode. In the integration's **Configure** options, select the Battery BMS SOC sensor (normally `sensor.{prefix}_battery_bms_soc`). Keep the large **Dry run — do not change the inverter** checkbox enabled to simulate plans safely. Turning it off requires confirmation, makes the card visually prominent, and permits approved active periods to change the inverter. During an approved active period, the integration snapshots the live plan before setting only Work Mode to `Selling First` and the current TOU slot's SOC to that period's target. It checks the SOC every 15 seconds; on reaching the target or at period end, it restores the saved Work Mode and slot SOC, marks the range completed, and will not restart it if SOC rebounds. While it runs, its approval and target-SOC controls are disabled and a **STOP** button restores the snapshot and completes that period. A completed period offers **RESTART** only as an explicit confirmed action during the remainder of its original hour. The snapshot is persisted before any write and is recovered after Home Assistant startup. While a selling session is active, the midnight weekly schedule is suppressed. Missing SOC or failed reads/writes result in a restore attempt and an error, rather than a new sell attempt.
-
-### Action log
-
-The manager retains its latest 500 preset, schedule, selling-plan, and inverter-control events in its Home Assistant storage. Use `custom:deye-tou-action-log-card` to browse the time, action, and detail for each event. The same entries are exposed as the manager sensor's `action_log` attribute.
-
-### Export and revenue ledger
-
-In the integration's **Configure** options, select the cumulative grid-export and grid-import energy sensors. At five seconds past every hour, the manager reads their Recorder history at both hour boundaries, calculates `max(0, exported − imported)`, and multiplies it by the corresponding hourly RCE price. Zero or negative net export is ignored and is not retained in the history. Counter resets, incomplete meter readings, and missing RCE price history are skipped rather than guessed.
-
-The completed records are stored with the integration data and are included in the manager sensor's `revenue.hours` attribute. Use `custom:deye-tou-selling-history-card` to browse one day at a time (up to 24 hourly rows), including the hour range, RCE price, sold net kWh, and revenue. The card also displays the selected day's kWh/revenue sum and all-time revenue. The all-time totals are available immediately as:
+Use `custom:deye-tou-selling-history-card` to view daily net export and revenue. The totals are also available as:
 
 | Entity | Meaning |
 | --- | --- |
 | `sensor.deye_tou_selling_revenue_total` | Total measured revenue in PLN |
 | `sensor.deye_tou_selling_net_export_total` | Total measured net exported energy in kWh |
 
-After the meters are configured, startup and each hourly run backfill one 31-day Recorder-history batch, working backwards to January 2024 (subject to retained Recorder and RCE data). This avoids a long database query blocking normal selling control. Hours already stored are never recalculated.
-
-### Selling TODO
-
-- Verify the physical selling behavior on the actual inverter before relying on it unattended. The optional TOU discharge-power override is not yet used.
-- Add Home Assistant notifications for proposed/approved plans; make the notification target configurable later.
+For meter requirements and calculation details, see [Advanced usage and safety](docs/advanced-usage.md#revenue-ledger).
 
 ## Troubleshooting
 
