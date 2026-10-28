@@ -142,6 +142,10 @@
   "actionLogTitle": "Dziennik działań",
   "actionLogSubtitle": "Ostatnie zapisane zdarzenia presetów, planowania, sprzedaży i sterowania falownikiem. Zachowywane jest ostatnie 500 zdarzeń.",
   "actionLogEmpty": "Nie zapisano jeszcze żadnych działań.",
+  "actionLogNoNormal": "Brak zdarzeń w trybie normalnym. Wybierz tryb szczegółowy, aby zobaczyć rutynowe zmiany.",
+  "actionLogMode": "Pokaż",
+  "actionLogNormal": "Normalny",
+  "actionLogVerbose": "Szczegółowy",
   "actionLogTimestamp": "Czas",
   "actionLogAction": "Działanie",
   "actionLogDetail": "Szczegóły"

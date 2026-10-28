@@ -26,7 +26,7 @@ Before an apply, the integration checks all six slots and TOU switch states. It 
 
 The selling card uses the Lewa-Reka [RCE PSE integration](https://github.com/Lewa-Reka/ha-rce-pse). In the integration's **Configure** options, choose its **Price** and **Price Tomorrow** entities. The planner reads a complete day of 15-minute prices, converts PLN/MWh or PLN/kWh to PLN/kWh, calculates hourly mean prices, and selects the highest configured number of one-hour blocks above the minimum price.
 
-You can limit candidates to morning, afternoon, evening (16:00–24:00), or any time. A plan for today excludes periods that have already begun. **Check today** and **Check tomorrow** save the visible settings before recalculating. Incomplete, inconsistent, or daylight-saving duplicate price data is rejected.
+You can limit candidates to morning, afternoon, evening (16:00–24:00), or any time. A plan for today excludes completed hours but can include the current hour until it ends. **Check today** and **Check tomorrow** save the visible settings before recalculating. Incomplete, inconsistent, or daylight-saving duplicate price data is rejected.
 
 Choose Off, semi-automatic, or automatic mode. The manager plans tomorrow at 18:00 and recalculates today at 00:00:15. Every selected one-hour period has an individual approval and target SOC. Automatic mode approves valid periods during the midnight check; semi-automatic mode requires individual approval. Changed prices, settings, or missing price data revoke calculated approvals. Manual selling hours bypass the price threshold but still need their own approval in semi-automatic mode.
 
@@ -40,7 +40,7 @@ During a live period, approval and target-SOC controls are disabled. **STOP** re
 
 ## Action log
 
-The integration retains its latest 500 preset, schedule, planning, selling, and inverter-control events in Home Assistant storage. Add `custom:deye-tou-action-log-card` to browse the timestamp, action, and detail. The same entries are exposed as the manager sensor's `action_log` attribute.
+The integration retains its latest 500 preset, schedule, planning, selling, and inverter-control events in Home Assistant storage. Add `custom:deye-tou-action-log-card` to browse the timestamp, action, and detail. **Normal** mode hides selling-settings, findings-clear, target-SOC, and weekday-assignment changes; **Verbose** mode shows every event. The same entries are exposed as the manager sensor's `action_log` attribute.
 
 ## Revenue ledger
 

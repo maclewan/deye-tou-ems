@@ -142,6 +142,10 @@
   "actionLogTitle": "Action log",
   "actionLogSubtitle": "Recent saved preset, planning, selling, and inverter-control events. The latest 500 events are retained.",
   "actionLogEmpty": "No actions have been recorded yet.",
+  "actionLogNoNormal": "No events match Normal mode. Choose Verbose to view routine changes.",
+  "actionLogMode": "Show",
+  "actionLogNormal": "Normal",
+  "actionLogVerbose": "Verbose",
   "actionLogTimestamp": "Timestamp",
   "actionLogAction": "Action",
   "actionLogDetail": "Details"

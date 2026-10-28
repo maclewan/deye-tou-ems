@@ -65,7 +65,7 @@ class SellingPlannerTests(unittest.TestCase):
         self.assertEqual([(r["start"], r["end"]) for r in plan["ranges"]],
                          [("11:00", "12:00")])
 
-    def test_evening_range_and_past_hours_are_excluded(self):
+    def test_evening_range_excludes_ended_hours_but_keeps_current_hour(self):
         hourly = [100.0] * 24
         hourly[16], hourly[18], hourly[21] = 900.0, 1000.0, 800.0
         plan = SELLING.make_sell_plan(
@@ -74,7 +74,7 @@ class SellingPlannerTests(unittest.TestCase):
             now=datetime(2026, 10, 26, 18, 20),
         )
         self.assertEqual([(r["start"], r["end"]) for r in plan["ranges"]],
-                         [("21:00", "22:00")])
+                         [("18:00", "19:00"), ("21:00", "22:00")])
 
     def test_missing_quarter_and_duplicate_fail_closed(self):
         records = price_day(self.day, [500.0] * 24)

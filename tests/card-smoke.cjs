@@ -120,6 +120,18 @@ const SellingCard = registry.get("deye-tou-selling-card");
 assert.ok(SellingCard, "selling card registers from the same dashboard resource");
 const ActionLogCard = registry.get("deye-tou-action-log-card");
 assert.ok(ActionLogCard, "action log card registers from the same dashboard resource");
+const actionLogCard = new ActionLogCard();
+actionLogCard._translationCache.en = english;
+actionLogCard.setConfig({});
+actionLogCard.hass = { states: {
+  "sensor.deye_tou_preset_manager": { attributes: { action_log: [
+    {timestamp:"2026-10-26T18:00:00", action:"Selling target SOC changed", detail:"routine"},
+    {timestamp:"2026-10-26T18:01:00", action:"Selling started", detail:"important"},
+  ] } },
+} };
+assert.match(actionLogCard.shadowRoot.innerHTML, /Selling started/);
+assert.doesNotMatch(actionLogCard.shadowRoot.innerHTML, /Selling target SOC changed/);
+assert.match(actionLogCard.shadowRoot.innerHTML, /<option value="normal" selected>Normal/);
 const sellingCard = new SellingCard();
 sellingCard._translationCache.en = english;
 sellingCard.setConfig({});

@@ -97,7 +97,9 @@ def make_sell_plan(
             range(16, 24) if time_of_day == "evening" else range(24)
         )
     )
-    past_hours = set(range(now.hour + 1)) if now is not None and day == now.date() else set()
+    # The current hour remains usable until it actually ends. This allows a
+    # manually approved plan to start part-way through a high-price hour.
+    past_hours = set(range(now.hour)) if now is not None and day == now.date() else set()
     candidates = [
         {
             "start": f"{hour:02d}:00", "end": f"{hour + 1:02d}:00",

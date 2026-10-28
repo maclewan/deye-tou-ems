@@ -1,5 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
+const ACTION_LOG_MODE_KEY = "deye-tou-action-log-mode";
 const CARD_TRANSLATION_VERSION = "1.1.0";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
@@ -475,7 +476,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     </div><div class="actions"><button class="primary" id="selling-add-manual">${this.h("sellingAddManualButton")}</button><button id="selling-manual-cancel">${this.h("sellingCancel")}</button></div>
     <p class="muted">${this.h("sellingManualFormNote")}</p></section></div>` : "";
     this.shadowRoot.innerHTML = `<style>
-      ha-card{padding:20px;color:var(--primary-text-color);background:var(--card-background-color)}ha-card.dry-run{background:rgba(83,111,137,.13);border:1px solid rgba(83,111,137,.45)}ha-card.live-control{background:rgba(46,125,50,.12);border:1px solid rgba(46,125,50,.6)}h2,h3{margin:0 0 10px}h3{font-size:16px}
+      ha-card{padding:20px;color:var(--primary-text-color);background:var(--card-background-color)}ha-card.dry-run{background:rgba(83,111,137,.13);border:1px solid rgba(83,111,137,.45)}ha-card.live-control{background:rgba(46,125,50,.035);border:1px solid rgba(46,125,50,.24)}h2,h3{margin:0 0 10px}h3{font-size:16px}
       .header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
       .muted{color:var(--secondary-text-color);font-size:13px;line-height:1.5}
       .warning{color:var(--warning-color);font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
@@ -486,7 +487,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       .actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.range{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--divider-color);padding:10px;border-radius:8px;margin:7px 0}.range-soc{max-width:150px}.stop{border-color:var(--error-color);color:var(--error-color)}
       .range small{width:100%;color:var(--secondary-text-color)}section{border-top:1px solid var(--divider-color);padding-top:14px;margin-top:14px}
       .approval{flex-direction:row;align-items:center;margin-top:12px}.approval input{width:18px;min-height:18px}
-      .dry-run-toggle{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:10px;padding:14px;border:2px solid rgba(83,111,137,.55);border-radius:9px;font-weight:700;font-size:15px;background:rgba(83,111,137,.12)}.dry-run-toggle input{width:22px;min-height:22px}.dry-run-toggle.live{border-color:rgba(46,125,50,.7);background:rgba(46,125,50,.12);color:var(--primary-text-color)}.live-control .warning{color:#2e7d32}.dry-run .warning{color:#526f89}
+      .dry-run-toggle{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:10px;padding:14px;border:2px solid rgba(83,111,137,.55);border-radius:9px;font-weight:700;font-size:15px;background:rgba(83,111,137,.12)}.dry-run-toggle input{width:22px;min-height:22px}.dry-run-toggle.live{border-color:rgba(46,125,50,.32);background:rgba(46,125,50,.045);color:var(--primary-text-color)}.live-control .warning{color:#4f7552}.dry-run .warning{color:#526f89}
       .language-picker{display:flex;flex-direction:row;align-items:center}.language-picker select{width:auto;min-height:32px}
       .modal-backdrop{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45)}.manual-modal{width:min(460px,100%);margin:0;padding:18px;border:0;border-radius:10px;background:var(--card-background-color);box-shadow:var(--ha-card-box-shadow,0 2px 12px rgba(0,0,0,.35))}
       #status{min-height:18px;font-size:12px;color:var(--success-color)}#status.error{color:var(--error-color)}
@@ -679,9 +680,18 @@ class DeyeTouActionLogCard extends DeyeTouManagerCard {
   constructor() {
     super();
     this._page = 0;
+    this._logMode = "normal";
   }
   getCardSize() { return 8; }
   static getStubConfig() { return {type:"custom:deye-tou-action-log-card"}; }
+  setConfig(config) {
+    super.setConfig(config);
+    let stored;
+    try { stored = window.localStorage?.getItem(ACTION_LOG_MODE_KEY); } catch (_) { /* unavailable */ }
+    const requested = stored || config?.log_mode || "normal";
+    this._logMode = requested === "verbose" ? "verbose" : "normal";
+    if (this._hass) this.render();
+  }
   render() {
     if (!this._texts) {
       this.shadowRoot.innerHTML = this._translationError
@@ -690,17 +700,29 @@ class DeyeTouActionLogCard extends DeyeTouManagerCard {
       return;
     }
     const attributes = this._hass?.states["sensor.deye_tou_preset_manager"]?.attributes;
-    const events = Array.isArray(attributes?.action_log) ? [...attributes.action_log].reverse() : [];
+    const routineActions = new Set([
+      "Selling settings changed", "Selling findings cleared",
+      "Selling target SOC changed", "Weekday assignment changed",
+    ]);
+    const allEvents = Array.isArray(attributes?.action_log) ? [...attributes.action_log].reverse() : [];
+    const events = this._logMode === "verbose"
+      ? allEvents : allEvents.filter(event => !routineActions.has(event.action));
     const pageSize = 25;
     const pages = Math.max(1, Math.ceil(events.length / pageSize));
     this._page = Math.min(this._page, pages - 1);
     const records = events.slice(this._page * pageSize, (this._page + 1) * pageSize);
     const rows = records.map(event => `<tr class="${this.escape(event.level || "info")}"><td>${this.escape(String(event.timestamp || "").replace("T", " "))}</td><td>${this.escape(event.action || "—")}</td><td>${this.escape(event.detail || "—")}</td></tr>`).join("");
     this.shadowRoot.innerHTML = `<style>
-      :host{display:block;color:var(--primary-text-color)}ha-card{display:block;padding:20px;background:var(--card-background-color)}h2{font-size:20px;margin:0 0 4px}.muted{font-size:13px;color:var(--secondary-text-color);line-height:1.5}.scroll{overflow-x:auto}.log-table{width:100%;border-collapse:collapse}.log-table th,.log-table td{padding:9px 7px;border-bottom:1px solid var(--divider-color);text-align:left;font-size:13px;vertical-align:top}.log-table th{color:var(--secondary-text-color);font-weight:600}.log-table tr.warning td:first-child{color:var(--warning-color)}.log-table tr.error td:first-child{color:var(--error-color)}.log-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 10px}button{min-width:40px;min-height:36px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:default}@media(max-width:560px){ha-card{padding:15px}.log-table th,.log-table td{font-size:12px;padding:8px 5px}}
-    </style><ha-card><h2>${this.h("actionLogTitle")}</h2><p class="muted">${this.h("actionLogSubtitle")}</p>
-      ${!attributes ? `<p class="muted">${this.h("missingSensor")}</p>` : !events.length ? `<p class="muted">${this.h("actionLogEmpty")}</p>` : `<div class="log-nav"><button id="log-newer" ${this._page === 0 ? "disabled" : ""}>‹</button><b>${this._page + 1} / ${pages}</b><button id="log-older" ${this._page >= pages - 1 ? "disabled" : ""}>›</button></div><div class="scroll"><table class="log-table"><thead><tr><th>${this.h("actionLogTimestamp")}</th><th>${this.h("actionLogAction")}</th><th>${this.h("actionLogDetail")}</th></tr></thead><tbody>${rows}</tbody></table></div>`}
+      :host{display:block;color:var(--primary-text-color)}ha-card{display:block;padding:20px;background:var(--card-background-color)}h2{font-size:20px;margin:0 0 4px}.muted{font-size:13px;color:var(--secondary-text-color);line-height:1.5}.header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.log-mode{display:flex;flex-direction:row;align-items:center;gap:7px;font-size:13px}.log-mode select{min-height:32px;padding:4px 7px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit}.scroll{overflow-x:auto}.log-table{width:100%;border-collapse:collapse}.log-table th,.log-table td{padding:9px 7px;border-bottom:1px solid var(--divider-color);text-align:left;font-size:13px;vertical-align:top}.log-table th{color:var(--secondary-text-color);font-weight:600}.log-table tr.warning td:first-child{color:var(--warning-color)}.log-table tr.error td:first-child{color:var(--error-color)}.log-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 10px}button{min-width:40px;min-height:36px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:default}@media(max-width:560px){ha-card{padding:15px}.log-table th,.log-table td{font-size:12px;padding:8px 5px}}
+    </style><ha-card><div class="header"><h2>${this.h("actionLogTitle")}</h2><label class="log-mode">${this.h("actionLogMode")}<select id="log-mode"><option value="normal" ${this._logMode === "normal" ? "selected" : ""}>${this.h("actionLogNormal")}</option><option value="verbose" ${this._logMode === "verbose" ? "selected" : ""}>${this.h("actionLogVerbose")}</option></select></label></div><p class="muted">${this.h("actionLogSubtitle")}</p>
+      ${!attributes ? `<p class="muted">${this.h("missingSensor")}</p>` : !events.length ? `<p class="muted">${allEvents.length ? this.h("actionLogNoNormal") : this.h("actionLogEmpty")}</p>` : `<div class="log-nav"><button id="log-newer" ${this._page === 0 ? "disabled" : ""}>‹</button><b>${this._page + 1} / ${pages}</b><button id="log-older" ${this._page >= pages - 1 ? "disabled" : ""}>›</button></div><div class="scroll"><table class="log-table"><thead><tr><th>${this.h("actionLogTimestamp")}</th><th>${this.h("actionLogAction")}</th><th>${this.h("actionLogDetail")}</th></tr></thead><tbody>${rows}</tbody></table></div>`}
     </ha-card>`;
+    this.shadowRoot.getElementById("log-mode")?.addEventListener("change", event => {
+      this._logMode = event.target.value === "verbose" ? "verbose" : "normal";
+      this._page = 0;
+      try { window.localStorage?.setItem(ACTION_LOG_MODE_KEY, this._logMode); } catch (_) { /* unavailable */ }
+      this.render();
+    });
     this.shadowRoot.getElementById("log-newer")?.addEventListener("click", () => { this._page--; this.render(); });
     this.shadowRoot.getElementById("log-older")?.addEventListener("click", () => { this._page++; this.render(); });
   }
