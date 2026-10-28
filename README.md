@@ -48,41 +48,19 @@ The slot voltage entities and the inverter's global Battery Grid Charging permis
 3. Find **Deye TOU Manager** in HACS and install it.
 4. Restart Home Assistant, then open **Settings → Devices & services → Add integration**, search for **Deye TOU Preset Manager**, and choose the inverter's Work Mode entity.
 
-HACS installs files under `custom_components/deye_tou_manager`. The setup flow activates the manager without editing `configuration.yaml`. In the default dashboard resource mode, the integration also installs and updates its card resource automatically. See [HACS custom repositories](https://www.hacs.xyz/docs/faq/custom_repositories/) for the current HACS interface.
-
-### Manual installation
-
-Copy the repository's `custom_components/deye_tou_manager` directory into `/config/custom_components/deye_tou_manager`, restart Home Assistant, then add the integration from **Settings → Devices & services**. The dashboard card is already inside the integration directory; do not copy it separately to `/config/www`.
+HACS installs files under `custom_components/deye_tou_manager`. The setup flow activates the manager without editing `configuration.yaml`, and installs/updates the shared card resource automatically. See [HACS custom repositories](https://www.hacs.xyz/docs/faq/custom_repositories/) for the current HACS interface.
 
 ## Configuration
 
-The recommended setup is through **Settings → Devices & services → Add integration → Deye TOU Preset Manager**. Choose the Lewa-Reka ESPHome inverter's `select.…_system_work_mode` entity, then optionally select cumulative grid-export and grid-import energy meters. The setup lists only live `energy` / `total_increasing` sensors with Wh, kWh, or MWh units. The integration uses the Work Mode prefix for all TOU controls; `deye_inverter_esp32` is no longer required. No YAML entry is needed, and setup does not change inverter settings. If more than one compatible Work Mode entity exists, choose the intended inverter carefully. You can change it later under the integration's **Configure** options; doing so reloads the manager. Changing the target disables the weekly schedule until you review and re-enable it.
+Set up the integration through **Settings → Devices & services → Add integration → Deye TOU Preset Manager**. Choose the Lewa-Reka ESPHome inverter's `select.…_system_work_mode` entity, then optionally select cumulative grid-export and grid-import energy meters. The setup lists only live `energy` / `total_increasing` sensors with Wh, kWh, or MWh units. The integration uses the Work Mode prefix for all TOU controls and does not change inverter settings during setup. If more than one compatible Work Mode entity exists, choose the intended inverter carefully. You can change it later under the integration's **Configure** options; doing so reloads the manager. Changing the target disables the weekly schedule until you review and re-enable it.
 
-Legacy YAML setup remains supported. If you already have the following at the top level of `/config/configuration.yaml`, you can keep it instead of adding the integration through the UI:
-
-```yaml
-deye_tou_manager:
-```
-
-For YAML setup, the only matching Work Mode entity is detected automatically. If several are present, specify the one to control:
-
-```yaml
-deye_tou_manager:
-  work_mode_entity: select.my_deye_system_work_mode
-```
-
-The other entity IDs must retain the Lewa-Reka suffixes shown above. If they have been renamed individually, selecting Work Mode alone cannot map them.
-For reliable YAML startup when ESPHome is offline, set `work_mode_entity` explicitly. Older YAML installs with no detected entity retain the previous `deye_inverter_esp32` target as a compatibility fallback.
-
-After UI setup or a YAML configuration check and restart, `sensor.deye_tou_preset_manager` should appear with `presets`, `preset_ids`, `assignments`, and `auto_enabled` attributes. To move from YAML to UI setup, remove the YAML entry, restart, and add the integration through **Devices & services**; the saved presets use the same storage key.
+After setup and restart, `sensor.deye_tou_preset_manager` exposes presets, weekday assignments, selling plans, and revenue data.
 
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.6
+/api/deye_tou_manager/deye-tou-manager-card.js?v=1.0.0
 ```
-
-If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
 
 Add a manual card to your dashboard:
 
@@ -102,7 +80,7 @@ Add the separate hourly revenue-history card to browse one recorded day at a tim
 type: custom:deye-tou-selling-history-card
 ```
 
-After a card update, refresh the browser. Storage-mode resource URLs are updated by the integration when needed; YAML-mode resource URLs remain your responsibility.
+After a card update, refresh the browser.
 
 ## Usage
 
@@ -125,7 +103,7 @@ The integration also registers these Home Assistant actions:
 | `deye_tou_manager.stop_selling` | Stop the active period and restore the prior settings | Yes |
 | `deye_tou_manager.restart_selling` | Restart a completed period during its original hour | Yes |
 
-Presets and assignments are stored by Home Assistant in `/config/.storage/deye_tou_manager`. Presets use stable SHA-256 keys, while names remain editable labels; weekday assignments reference those keys. Existing name-keyed storage is migrated automatically on the first startup with this release. Back up the storage file before upgrading, and do not edit the live file by hand. Existing service calls by name still work; to rename through `save_definition`, pass the existing key from the sensor's `preset_ids` attribute as `preset_id` with the new `name`.
+Presets, selling plans, and revenue records are stored by Home Assistant in `/config/.storage/deye_tou_manager`. Presets use stable SHA-256 keys while names remain editable labels; weekday assignments reference those keys. Do not edit the live storage file by hand. To rename through `save_definition`, pass the preset ID from the manager sensor's `preset_ids` attribute as `preset_id` with the new `name`.
 
 ### Apply behavior and safety
 
@@ -135,7 +113,7 @@ Readback waits for up to 30 seconds. Slow ESPHome updates can therefore report a
 
 The schedule uses Home Assistant local time. Manual and scheduled applies share a lock, so they cannot write concurrently.
 
-## Energy selling work in progress
+## Energy selling
 
 The separate `custom:deye-tou-selling-card` uses the Lewa-Reka [RCE PSE integration](https://github.com/Lewa-Reka/ha-rce-pse). In **Settings → Devices & services → Deye TOU Preset Manager → Configure**, select the RCE PSE **Price** and **Price Tomorrow** entities. The detected RCE PSE entities are preselected; choose the blank option to use automatic detection after a later RCE PSE setup. Entity selection uses the integration's stable IDs, so it works regardless of the Home Assistant display language. The planner reads a complete day's 15-minute records, converts the sensor's PLN/MWh or PLN/kWh unit to PLN/kWh, computes hourly mean prices, and selects up to the configured number of highest-priced **one-hour** blocks above the minimum price. It can limit candidates to morning, afternoon, evening (16:00–24:00), or any time. When planning today, periods that have already started are excluded. Pressing **Check today** or **Check tomorrow** first saves all displayed planner settings, then calculates using them. Incomplete or inconsistent price data is rejected, including duplicate local times on a daylight-saving transition day.
 
@@ -161,21 +139,12 @@ After the meters are configured, startup and each hourly run backfill one 31-day
 - Verify the physical selling behavior on the actual inverter before relying on it unattended. The optional TOU discharge-power override is not yet used.
 - Add Home Assistant notifications for proposed/approved plans; make the notification target configurable later.
 
-## Upgrading from the manual 0.3.0 installation
-
-1. Back up `/config/.storage/deye_tou_manager`.
-2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
-3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.6` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for all three cards.
-4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
-
-The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged. This release migrates the preset and assignment format in that same storage file automatically; verify your presets and weekday assignments after restarting. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.
-
 ## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
-| Card says the manager sensor is missing | Confirm the integration was added through **Devices & services**, or that the legacy YAML entry is present; restart Home Assistant and check the logs. |
-| Card does not load | Confirm that the integration is active and the single JavaScript module resource URL matches the URL above, then refresh the browser. YAML-mode resources must be edited manually. |
+| Card says the manager sensor is missing | Confirm the integration was added through **Devices & services**, restart Home Assistant, and check the logs. |
+| Card does not load | Confirm that the integration is active and the card resource URL matches the URL above, then refresh the browser. |
 | No compatible Work Mode entity at UI setup | Finish the ESPHome setup and confirm its `select.…_system_work_mode` entity appears in Home Assistant, then try again. |
 | Apply fails or TOU remains off | Check the selected Work Mode entity, ESPHome availability, the six slot readings, all seven day switches, and Home Assistant logs before manually enabling TOU. |
 | Schedule does not apply a preset | Confirm it is enabled and that today's weekday has an assignment. |
