@@ -55,7 +55,7 @@ After setup, `sensor.deye_tou_preset_manager` contains the integration data.
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=1.0.3
+/api/deye_tou_manager/deye-tou-manager-card.js?v=1.0.4
 ```
 
 Add a manual card to your dashboard:
