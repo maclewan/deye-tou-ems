@@ -40,7 +40,7 @@ During a live period, approval and target-SOC controls are disabled. **STOP** re
 
 ## Action log
 
-The integration retains its latest 500 preset, schedule, planning, selling, and inverter-control events in Home Assistant storage. Add `custom:deye-tou-action-log-card` to browse the timestamp, action, and detail. **Normal** mode hides selling-settings, findings-clear, target-SOC, and weekday-assignment changes; **Verbose** mode shows every event. The same entries are exposed as the manager sensor's `action_log` attribute.
+The integration retains its latest 500 preset, schedule, planning, selling, and inverter-control events in Home Assistant storage. Add `custom:deye-tou-action-log-card` to browse the timestamp, action, and detail. **Normal** mode hides selling-settings, findings-clear, target-SOC, weekday-assignment, and successful plan-calculation changes; **Verbose** mode shows every event. The same entries are exposed as the manager sensor's `action_log` attribute.
 
 ## Revenue ledger
 

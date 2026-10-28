@@ -1,7 +1,7 @@
 /* Deye TOU EMS: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
 const ACTION_LOG_MODE_KEY = "deye-tou-action-log-mode";
-const CARD_TRANSLATION_VERSION = "1.0.0";
+const CARD_TRANSLATION_VERSION = "1.0.3";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -703,6 +703,7 @@ class DeyeTouActionLogCard extends DeyeTouManagerCard {
     const routineActions = new Set([
       "Selling settings changed", "Selling findings cleared",
       "Selling target SOC changed", "Weekday assignment changed",
+      "Selling plan calculated",
     ]);
     const allEvents = Array.isArray(attributes?.action_log) ? [...attributes.action_log].reverse() : [];
     const events = this._logMode === "verbose"

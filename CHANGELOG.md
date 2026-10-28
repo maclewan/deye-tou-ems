@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+- Renamed the user-facing integration to Deye TOU EMS.
+- Added Normal and Verbose modes to the action-log card.
+- Allowed the current selling hour to be planned until it ends.
+
 ## 1.0.0
 
 - Replaced the live-control opt-in with a confirmed Dry run control that is enabled by default.
