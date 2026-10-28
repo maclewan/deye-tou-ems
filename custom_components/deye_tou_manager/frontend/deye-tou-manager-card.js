@@ -265,6 +265,8 @@ class DeyeTouManagerCard extends HTMLElement {
     const days = Object.fromEntries(["monday", "tuesday", "wednesday", "thursday",
       "friday", "saturday", "sunday"].map(day => [day, this.tr(day)]));
     const options = names.map(n => `<option value="${this.escape(n)}" ${n === this._selected ? "selected" : ""}>${this.escape(n)}</option>`).join("");
+    const assignmentSelect = ([key, label]) => `<div class="day"><label>${this.escape(label)}</label><select data-day="${key}">
+      <option value="">${this.h("noAssignment")}</option>${names.map(n => `<option value="${this.escape(n)}" ${data.assignments?.[key] === n ? "selected" : ""}>${this.escape(n)}</option>`).join("")}</select></div>`;
     this.shadowRoot.innerHTML = `
       <style>
         :host{display:block;color:var(--primary-text-color)}
@@ -290,7 +292,7 @@ class DeyeTouManagerCard extends HTMLElement {
         .live-slot{display:flex;align-items:flex-start;gap:10px;padding:9px 11px;border-radius:8px;background:var(--secondary-background-color);font-size:12px}
         .live-index{display:inline-flex;flex:none;align-items:center;justify-content:center;border-radius:50%;width:20px;height:20px;background:var(--primary-color);color:white}
         .live-time{font-weight:600;font-size:13px}.live-details{color:var(--secondary-text-color);line-height:1.5;margin-top:2px}
-        .days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+        .days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.day-column{display:grid;align-content:start;gap:10px}
         .day{display:flex;align-items:center;gap:9px}.day label{min-width:88px;font-size:13px}.day select{flex:1;min-width:0}
         .automode{display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--secondary-background-color);border-radius:10px;padding:13px;margin:12px 0}
         .automode label{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px}
@@ -327,9 +329,8 @@ class DeyeTouManagerCard extends HTMLElement {
         <p class="muted">${this.h("captureNote")}</p>
         <div class="rule"></div>
         <h3>${this.h("weekdays")}</h3>
-        <div class="days">${Object.entries(days).map(([key,label])=>
-          `<div class="day"><label>${this.escape(label)}</label><select data-day="${key}">
-          <option value="">${this.h("noAssignment")}</option>${names.map(n=>`<option value="${this.escape(n)}" ${data.assignments?.[key]===n?"selected":""}>${this.escape(n)}</option>`).join("")}</select></div>`).join("")}</div>
+        <div class="days"><div class="day-column workdays">${Object.entries(days).slice(0, 5).map(assignmentSelect).join("")}</div>
+          <div class="day-column weekend">${Object.entries(days).slice(5).map(assignmentSelect).join("")}</div></div>
         <p class="muted">${this.h("assignmentNote")}</p>`}
         ${data ? `<div class="rule"></div>
           <h3>${this.h("automation")}</h3>

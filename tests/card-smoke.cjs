@@ -75,6 +75,8 @@ card.hass = { states: {
 } };
 assert.match(card.shadowRoot.innerHTML, /Current inverter settings/);
 assert.match(card.shadowRoot.innerHTML, /id="card-language"/);
+assert.match(card.shadowRoot.innerHTML, /class="day-column workdays">[\s\S]*Monday[\s\S]*Friday/);
+assert.match(card.shadowRoot.innerHTML, /class="day-column weekend">[\s\S]*Saturday[\s\S]*Sunday/);
 assert.match(card.shadowRoot.innerHTML, /37 %/);
 assert.match(card.shadowRoot.innerHTML, /6000 W/);
 assert.match(card.shadowRoot.innerHTML, /\.live-slots\{display:grid;grid-template-columns:1fr/);
