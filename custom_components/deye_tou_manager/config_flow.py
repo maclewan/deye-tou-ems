@@ -1,4 +1,4 @@
-"""Choose the ESPHome inverter controlled by the Deye TOU Preset Manager."""
+"""Choose the ESPHome inverter controlled by Deye TOU EMS."""
 
 from homeassistant import config_entries
 from homeassistant.core import callback
@@ -32,7 +32,7 @@ class DeyeTouManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     and user_input.get(CONF_EXPORT_ENERGY_ENTITY, "") in energy_meters
                     and user_input.get(CONF_IMPORT_ENERGY_ENTITY, "") in energy_meters):
                 return self.async_create_entry(
-                    title="Deye TOU Preset Manager",
+                    title="Deye TOU EMS",
                     data={
                         CONF_WORK_MODE_ENTITY: user_input[CONF_WORK_MODE_ENTITY],
                         CONF_EXPORT_ENERGY_ENTITY: user_input.get(CONF_EXPORT_ENERGY_ENTITY, ""),

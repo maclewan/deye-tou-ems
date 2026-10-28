@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Set up Deye TOU Preset Manager",
+        "title": "Set up Deye TOU EMS",
         "description": "Choose the Lewa-Reka ESPHome inverter's Work Mode entity. The other TOU controls will use the same entity prefix. Setup does not change inverter settings.",
         "data": {
           "work_mode_entity": "Inverter Work Mode entity",

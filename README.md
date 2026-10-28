@@ -42,13 +42,13 @@ The slot voltage entities and the inverter's global Battery Grid Charging permis
 1. In HACS, open the menu and choose **Custom repositories**.
 2. Add `https://github.com/maclewan/deye-tou-ems` with category **Integration**.
 3. Find this integration in HACS and install it.
-4. Restart Home Assistant, then open **Settings → Devices & services → Add integration**, search for **Deye TOU Preset Manager**, and choose the inverter's Work Mode entity.
+4. Restart Home Assistant, then open **Settings → Devices & services → Add integration**, search for **Deye TOU EMS**, and choose the inverter's Work Mode entity.
 
 HACS installs the integration and registers the shared card resource automatically. No YAML is needed.
 
 ## Configuration
 
-Add **Deye TOU Preset Manager** in **Settings → Devices & services** and choose your inverter's Work Mode entity. Optionally select grid export/import meters for revenue estimates. You can change these later in **Configure**.
+Add **Deye TOU EMS** in **Settings → Devices & services** and choose your inverter's Work Mode entity. Optionally select grid export/import meters for revenue estimates. You can change these later in **Configure**.
 
 After setup, `sensor.deye_tou_preset_manager` contains the integration data.
 

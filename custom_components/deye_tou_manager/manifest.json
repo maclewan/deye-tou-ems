@@ -1,6 +1,6 @@
 {
   "domain": "deye_tou_manager",
-  "name": "Deye TOU Preset Manager",
+  "name": "Deye TOU EMS",
   "categories": ["energy.solar_batteries"],
   "version": "1.0.0",
   "documentation": "https://github.com/maclewan/deye-tou-ems#readme",

@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Skonfiguruj menedżer presetów Deye TOU",
+        "title": "Skonfiguruj Deye TOU EMS",
         "description": "Wybierz encję trybu pracy falownika Lewa-Reka ESPHome. Pozostałe kontrolki TOU zostaną dopasowane na podstawie tego samego prefiksu. Konfiguracja nie zmienia ustawień falownika.",
         "data": {
           "work_mode_entity": "Encja trybu pracy falownika",

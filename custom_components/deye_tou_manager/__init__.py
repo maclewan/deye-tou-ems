@@ -82,10 +82,10 @@ async def async_register_dashboard_resource(hass: HomeAssistant) -> None:
     """Install or migrate this card's storage-mode Lovelace resource."""
     lovelace = hass.data.get(LOVELACE_DATA)
     if lovelace is None:
-        _LOGGER.warning("Lovelace is not ready; add the Deye TOU card resource manually")
+        _LOGGER.warning("Lovelace is not ready; add the Deye TOU EMS card resource manually")
         return
     if getattr(lovelace, "resource_mode", None) != "storage":
-        _LOGGER.info("Lovelace resources use YAML; configure the Deye TOU card URL in YAML")
+        _LOGGER.info("Lovelace resources use YAML; configure the Deye TOU EMS card URL in YAML")
         return
 
     try:
@@ -115,7 +115,7 @@ async def async_register_dashboard_resource(hass: HomeAssistant) -> None:
                 if item is not keep:
                     await resources.async_delete_item(item["id"])
     except Exception:
-        _LOGGER.exception("Could not register the Deye TOU card; check dashboard resources")
+        _LOGGER.exception("Could not register the Deye TOU EMS card; check dashboard resources")
 
 
 def work_mode_candidates(hass: HomeAssistant) -> list[str]:
@@ -519,7 +519,7 @@ async def _async_start_manager(
             for day, preset_id in assignments.items()
         }
         hass.states.async_set(ENTITY, str(len(presets)), {
-            "friendly_name": "Deye TOU Preset Manager",
+            "friendly_name": "Deye TOU EMS",
             "presets": public_presets,
             "preset_ids": preset_ids,
             "assignments": assignment_names,
@@ -553,12 +553,12 @@ async def _async_start_manager(
         total_revenue = total("revenue_pln")
         total_kwh = total("net_exported_kwh")
         hass.states.async_set(REVENUE_ENTITY, str(total_revenue), {
-            "friendly_name": "Deye TOU selling revenue total", "unit_of_measurement": "PLN",
+            "friendly_name": "Deye TOU EMS selling revenue total", "unit_of_measurement": "PLN",
             "device_class": "monetary", "state_class": "total",
             "hours_recorded": len(revenue["hours"]),
         })
         hass.states.async_set(NET_EXPORT_ENTITY, str(total_kwh), {
-            "friendly_name": "Deye TOU selling net export total", "unit_of_measurement": "kWh",
+            "friendly_name": "Deye TOU EMS selling net export total", "unit_of_measurement": "kWh",
             "device_class": "energy", "state_class": "total",
             "hours_recorded": len(revenue["hours"]),
         })
@@ -700,7 +700,7 @@ async def _async_start_manager(
             except Exception:
                 _LOGGER.exception("Could not switch TOU off after a failed apply")
             raise
-        _LOGGER.info("Applied Deye TOU preset %s", presets[preset_id]["name"])
+        _LOGGER.info("Applied Deye TOU EMS preset %s", presets[preset_id]["name"])
         return True
 
     async def apply(call: ServiceCall) -> None:
@@ -1342,7 +1342,7 @@ async def _async_start_manager(
             except (HomeAssistantError, ValueError, TypeError, vol.Invalid):
                 await asyncio.sleep(5)
         else:
-            _LOGGER.warning("Deye TOU automation skipped: ESPHome not ready")
+            _LOGGER.warning("Deye TOU EMS automation skipped: ESPHome not ready")
             async with lock:
                 if not runtime["active"] or not auto_enabled:
                     return

@@ -600,7 +600,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
 if (!customElements.get("deye-tou-selling-card"))
   customElements.define("deye-tou-selling-card", DeyeTouSellingCard);
 if (!window.customCards.some(card => card.type === "deye-tou-selling-card"))
-  window.customCards.push({type:"deye-tou-selling-card",name:"Deye TOU Selling Planner",description:"Price-based selling plans and approvals"});
+  window.customCards.push({type:"deye-tou-selling-card",name:"Deye TOU EMS Selling Planner",description:"Price-based selling plans and approvals"});
 
 class DeyeTouSellingHistoryCard extends DeyeTouManagerCard {
   constructor() {
@@ -674,7 +674,7 @@ class DeyeTouSellingHistoryCard extends DeyeTouManagerCard {
 if (!customElements.get("deye-tou-selling-history-card"))
   customElements.define("deye-tou-selling-history-card", DeyeTouSellingHistoryCard);
 if (!window.customCards.some(card => card.type === "deye-tou-selling-history-card"))
-  window.customCards.push({type:"deye-tou-selling-history-card",name:"Deye TOU Selling History",description:"Hourly net export and revenue history"});
+  window.customCards.push({type:"deye-tou-selling-history-card",name:"Deye TOU EMS Selling History",description:"Hourly net export and revenue history"});
 
 class DeyeTouActionLogCard extends DeyeTouManagerCard {
   constructor() {
@@ -730,4 +730,4 @@ class DeyeTouActionLogCard extends DeyeTouManagerCard {
 if (!customElements.get("deye-tou-action-log-card"))
   customElements.define("deye-tou-action-log-card", DeyeTouActionLogCard);
 if (!window.customCards.some(card => card.type === "deye-tou-action-log-card"))
-  window.customCards.push({type:"custom:deye-tou-action-log-card",name:"Deye TOU Action Log",description:"Persisted inverter and planning actions"});
+  window.customCards.push({type:"custom:deye-tou-action-log-card",name:"Deye TOU EMS Action Log",description:"Persisted inverter and planning actions"});

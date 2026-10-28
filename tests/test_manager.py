@@ -465,7 +465,7 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(flow.domain, MANAGER.DOMAIN)
         self.assertEqual((await flow.async_step_user())["type"], "form")
         self.assertEqual(await flow.async_step_user({MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode"}), {
-            "type": "create_entry", "title": "Deye TOU Preset Manager",
+            "type": "create_entry", "title": "Deye TOU EMS",
             "data": {
                 MANAGER.CONF_WORK_MODE_ENTITY: "select.my_deye_system_work_mode",
                 MANAGER.CONF_EXPORT_ENERGY_ENTITY: "",
@@ -488,7 +488,7 @@ class ConfigFlowTests(unittest.IsolatedAsyncioTestCase):
             entity_id=entity_id, platform="esphome", disabled_by=None,
         )
         self.assertEqual(await flow.async_step_user({MANAGER.CONF_WORK_MODE_ENTITY: entity_id}), {
-            "type": "create_entry", "title": "Deye TOU Preset Manager",
+            "type": "create_entry", "title": "Deye TOU EMS",
             "data": {
                 MANAGER.CONF_WORK_MODE_ENTITY: entity_id,
                 MANAGER.CONF_EXPORT_ENERGY_ENTITY: "",
