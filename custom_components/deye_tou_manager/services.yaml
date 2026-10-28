@@ -86,7 +86,7 @@ set_auto:
         boolean:
 set_selling_settings:
   name: Set selling planning settings
-  description: Save selling settings. Enabling inverter control allows approved active periods to change Work Mode and the active TOU SOC.
+  description: Save selling settings. Dry run is on by default and prevents all inverter changes; turn it off only to permit approved active selling periods to change Work Mode and the active TOU SOC.
   fields:
     mode:
       name: Planning mode
@@ -96,9 +96,9 @@ set_selling_settings:
             - off
             - semi
             - automatic
-    control_enabled:
-      name: Enable inverter control
-      description: Opt in to physical inverter changes during approved selling periods.
+    dry_run:
+      name: Dry run
+      description: Keep enabled to simulate plans without changing the inverter. Turning it off enables physical control during approved selling periods.
       selector:
         boolean:
     threshold:

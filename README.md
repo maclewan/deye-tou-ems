@@ -59,7 +59,7 @@ After setup and restart, `sensor.deye_tou_preset_manager` exposes presets, weekd
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=1.0.0
+/api/deye_tou_manager/deye-tou-manager-card.js?v=1.1.0
 ```
 
 Add a manual card to your dashboard:
@@ -78,6 +78,12 @@ Add the separate hourly revenue-history card to browse one recorded day at a tim
 
 ```yaml
 type: custom:deye-tou-selling-history-card
+```
+
+Add the separate action-log card to review saved planning and inverter events:
+
+```yaml
+type: custom:deye-tou-action-log-card
 ```
 
 After a card update, refresh the browser.
@@ -119,7 +125,11 @@ The separate `custom:deye-tou-selling-card` uses the Lewa-Reka [RCE PSE integrat
 
 Choose Off, semi-automatic approval, or automatic approval in the card. At 18:00 Home Assistant local time the manager plans tomorrow; at 00:00:15 it recalculates today. Each selected one-hour block has its own approval and a target SOC. It defaults to the global minimum SOC, but can be changed per block before it starts. Automatic mode approves every valid block during the midnight recheck. Semi-automatic mode requires each checkbox to be approved separately. An unchanged block retains its approval, while changed settings, changed prices, or missing price data revoke it. **Add manual selling hour** in either day's plan opens a dialog for the one-hour start time and target SOC; start times are limited to `:00`, `:15`, `:30`, or `:45`. It still has an individual approval and survives price checks. **Clear findings** removes both calculated and manual hours.
 
-Physical selling is disabled by default. In the integration's **Configure** options, select the Battery BMS SOC sensor (normally `sensor.{prefix}_battery_bms_soc`), then explicitly enable **Enable inverter control** in the selling card. During an approved active period, the integration snapshots the live plan before setting only Work Mode to `Selling First` and the current TOU slot's SOC to that period's target. It checks the SOC every 15 seconds; on reaching the target or at period end, it restores the saved Work Mode and slot SOC, marks the range completed, and will not restart it if SOC rebounds. While it runs, its approval and target-SOC controls are disabled and a **STOP** button restores the snapshot and completes that period. A completed period offers **RESTART** only as an explicit confirmed action during the remainder of its original hour. The snapshot is persisted before any write and is recovered after Home Assistant startup. While a selling session is active, the midnight weekly schedule is suppressed. Missing SOC or failed reads/writes result in a restore attempt and an error, rather than a new sell attempt.
+Physical selling starts in **Dry run** mode. In the integration's **Configure** options, select the Battery BMS SOC sensor (normally `sensor.{prefix}_battery_bms_soc`). Keep the large **Dry run — do not change the inverter** checkbox enabled to simulate plans safely. Turning it off requires confirmation, makes the card visually prominent, and permits approved active periods to change the inverter. During an approved active period, the integration snapshots the live plan before setting only Work Mode to `Selling First` and the current TOU slot's SOC to that period's target. It checks the SOC every 15 seconds; on reaching the target or at period end, it restores the saved Work Mode and slot SOC, marks the range completed, and will not restart it if SOC rebounds. While it runs, its approval and target-SOC controls are disabled and a **STOP** button restores the snapshot and completes that period. A completed period offers **RESTART** only as an explicit confirmed action during the remainder of its original hour. The snapshot is persisted before any write and is recovered after Home Assistant startup. While a selling session is active, the midnight weekly schedule is suppressed. Missing SOC or failed reads/writes result in a restore attempt and an error, rather than a new sell attempt.
+
+### Action log
+
+The manager retains its latest 500 preset, schedule, selling-plan, and inverter-control events in its Home Assistant storage. Use `custom:deye-tou-action-log-card` to browse the time, action, and detail for each event. The same entries are exposed as the manager sensor's `action_log` attribute.
 
 ### Export and revenue ledger
 

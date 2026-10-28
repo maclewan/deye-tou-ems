@@ -75,9 +75,13 @@
   "sellingTitle": "Plan sprzedaży energii",
   "sellingPreviewOnly": "Sterowanie falownikiem jest wyłączone. Plany nie zmienią ustawień falownika ani nie rozpoczną eksportu z baterii.",
   "sellingControlEnabledWarning": "Sterowanie falownikiem jest włączone. Zatwierdzony aktywny okres ustawi Selling First i obniży aktywny slot TOU do minimalnego SOC.",
+  "sellingDryRunWarning": "TRYB TESTOWY jest włączony. Plany i zatwierdzenia są symulowane; falownik nie zostanie zmieniony.",
+  "sellingLiveControlWarning": "AKTYWNE STEROWANIE FALOWNIKIEM jest włączone. Zatwierdzony aktywny okres może ustawić Selling First i zmienić SOC aktywnego slotu TOU.",
   "sellingMode": "Tryb planowania",
   "sellingControlEnabled": "Włącz sterowanie falownikiem",
   "sellingControlConfirm": "Włączyć fizyczne sterowanie falownikiem? Zatwierdzone aktywne okresy ustawią Selling First i obniżą SOC aktywnego TOU do końca okresu lub osiągnięcia limitu baterii.",
+  "sellingDryRun": "Tryb testowy — nie zmieniaj falownika",
+  "sellingLiveControlConfirm": "Wyłączyć tryb testowy i włączyć aktywne sterowanie falownikiem? Zatwierdzone aktywne okresy mogą ustawić Selling First i zmienić SOC aktywnego TOU do końca okresu lub osiągnięcia limitu baterii.",
   "sellingOff": "Wyłączony",
   "sellingSemi": "Półautomatyczny: ręczne zatwierdzenie",
   "sellingAutomatic": "Automatyczne zatwierdzanie",
@@ -134,5 +138,11 @@
   "historyKwh": "Sprzedano (kWh)",
   "historyRevenue": "Przychód (PLN)",
   "historyDayTotal": "Suma dnia",
-  "historyAllTimeRevenue": "Przychód łącznie"
+  "historyAllTimeRevenue": "Przychód łącznie",
+  "actionLogTitle": "Dziennik działań",
+  "actionLogSubtitle": "Ostatnie zapisane zdarzenia presetów, planowania, sprzedaży i sterowania falownikiem. Zachowywane jest ostatnie 500 zdarzeń.",
+  "actionLogEmpty": "Nie zapisano jeszcze żadnych działań.",
+  "actionLogTimestamp": "Czas",
+  "actionLogAction": "Działanie",
+  "actionLogDetail": "Szczegóły"
 }

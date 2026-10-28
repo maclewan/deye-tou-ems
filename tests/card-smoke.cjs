@@ -115,9 +115,11 @@ assert.equal(card._editor.preset.slots[1].start, "05:00:00");
 assert.equal(firstEnd.textContent, "05:00");
 assert.equal(lastEnd.textContent, "00:00 (next day)");
 assert.equal(card.timeLabel("unavailable"), "—");
-assert.equal(window.customCards.length, 3);
+assert.equal(window.customCards.length, 4);
 const SellingCard = registry.get("deye-tou-selling-card");
 assert.ok(SellingCard, "selling card registers from the same dashboard resource");
+const ActionLogCard = registry.get("deye-tou-action-log-card");
+assert.ok(ActionLogCard, "action log card registers from the same dashboard resource");
 const sellingCard = new SellingCard();
 sellingCard._translationCache.en = english;
 sellingCard.setConfig({});
@@ -133,12 +135,13 @@ sellingCard.hass = { states: {
 } };
 assert.match(sellingCard.shadowRoot.innerHTML, /Energy selling planner/);
 assert.match(sellingCard.shadowRoot.innerHTML, /18:00–19:00/);
-assert.match(sellingCard.shadowRoot.innerHTML, /Inverter control is disabled/);
+assert.match(sellingCard.shadowRoot.innerHTML, /DRY RUN is enabled/);
+assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-dry-run"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /data-approve-date="2026-10-26"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-clear"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /data-open-manual="today"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /Target battery SOC/);
-assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-control"/);
+assert.match(sellingCard.shadowRoot.innerHTML, /id="sell-dry-run"/);
 assert.match(sellingCard.shadowRoot.innerHTML, /minimum price filters only automatic price suggestions/);
 sellingCard._manualDialogDay = "today";
 sellingCard.render();
@@ -206,7 +209,7 @@ async function testRename() {
   assert.equal(card._editor.presetId, "stable-hash-id");
   assert.equal(card._pendingSavedName, null);
   global.fetch = async url => {
-    assert.match(url, /card-pl\.json\?v=1\.0\.0$/);
+    assert.match(url, /card-pl\.json\?v=1\.1\.0$/);
     return { ok: true, json: async () => polish };
   };
   card.hass = { ...card._hass, language: "pl" };
@@ -227,8 +230,8 @@ async function testRename() {
   const uncachedCard = new Card();
   uncachedCard.setConfig({});
   global.fetch = async url => {
-    if (/card-pl\.json\?v=1\.0\.0$/.test(url)) return { ok: false };
-    assert.match(url, /card-en\.json\?v=1\.0\.0$/);
+    if (/card-pl\.json\?v=1\.1\.0$/.test(url)) return { ok: false };
+    assert.match(url, /card-en\.json\?v=1\.1\.0$/);
     return { ok: true, json: async () => english };
   };
   uncachedCard.hass = { language: "pl", states: {} };

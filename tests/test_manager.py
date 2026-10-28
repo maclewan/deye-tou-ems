@@ -774,6 +774,17 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         await self.hass.finish_tasks()
         self.assertEqual(self.hass.services.writes, [])
 
+    async def test_actions_are_persisted_and_published_for_the_log_card(self):
+        await self.call("save_definition", name="Weekday", preset=sample_preset())
+        await self.call("assign_day", day="monday", name="Weekday")
+        records = self.hass.saved["actions"]
+        self.assertEqual([record["action"] for record in records], [
+            "Preset created", "Weekday assignment changed",
+        ])
+        public_records = self.hass.states[MANAGER.ENTITY].attributes["action_log"]
+        self.assertEqual(public_records, records)
+        self.assertTrue(all(record["timestamp"] for record in records))
+
     async def test_semi_selling_card_plan_and_approval_are_persisted_without_writes(self):
         price_entity = put_rce_prices(self.hass, date(2026, 10, 27), "price_tomorrow")
         for record in self.hass.states[price_entity].attributes["prices"]:

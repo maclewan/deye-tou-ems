@@ -75,9 +75,13 @@
   "sellingTitle": "Energy selling planner",
   "sellingPreviewOnly": "Inverter control is disabled. Plans cannot change inverter settings or start battery export.",
   "sellingControlEnabledWarning": "Inverter control is enabled. An approved active period will set Selling First and lower the active TOU slot to the minimum SOC.",
+  "sellingDryRunWarning": "DRY RUN is enabled. Plans and approvals are simulated; the inverter will not be changed.",
+  "sellingLiveControlWarning": "LIVE INVERTER CONTROL is enabled. An approved active period can set Selling First and lower the active TOU slot to the target SOC.",
   "sellingMode": "Planning mode",
   "sellingControlEnabled": "Enable inverter control",
   "sellingControlConfirm": "Enable physical inverter control? Approved active periods will set Selling First and lower the active TOU SOC until the period ends or the battery reaches its limit.",
+  "sellingDryRun": "Dry run — do not change the inverter",
+  "sellingLiveControlConfirm": "Turn off dry run and enable live inverter control? Approved active periods may set Selling First and change the active TOU SOC until they end or the battery reaches its limit.",
   "sellingOff": "Off",
   "sellingSemi": "Semi-automatic: manual approval",
   "sellingAutomatic": "Automatic approval",
@@ -134,5 +138,11 @@
   "historyKwh": "Sold (kWh)",
   "historyRevenue": "Revenue (PLN)",
   "historyDayTotal": "Day total",
-  "historyAllTimeRevenue": "All-time revenue"
+  "historyAllTimeRevenue": "All-time revenue",
+  "actionLogTitle": "Action log",
+  "actionLogSubtitle": "Recent saved preset, planning, selling, and inverter-control events. The latest 500 events are retained.",
+  "actionLogEmpty": "No actions have been recorded yet.",
+  "actionLogTimestamp": "Timestamp",
+  "actionLogAction": "Action",
+  "actionLogDetail": "Details"
 }

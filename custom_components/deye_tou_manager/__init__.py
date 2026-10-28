@@ -45,7 +45,7 @@ LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
-CARD_VERSION = "1.0.0"
+CARD_VERSION = "1.1.0"
 CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
 CARD_TRANSLATION_URL = "/api/deye_tou_manager/card-{language}.json"
@@ -55,7 +55,9 @@ SELLING_DEFAULTS = {
     "mode": "off", "threshold": 0.5, "max_ranges": 2,
     "time_of_day": "afternoon", "min_soc": 30,
     "power_override": None, "today_price_entity": "", "tomorrow_price_entity": "",
-    "battery_soc_entity": "", "control_enabled": False,
+    # Selling always starts in simulation mode. Turning dry_run off is the
+    # explicit, safety-sensitive opt-in to changing physical inverter values.
+    "battery_soc_entity": "", "dry_run": True,
 }
 REVENUE_DEFAULTS = {CONF_EXPORT_ENERGY_ENTITY: "", CONF_IMPORT_ENERGY_ENTITY: ""}
 RCE_PRICE_UNIQUE_IDS = {
@@ -166,10 +168,26 @@ def energy_meter_candidates(hass: HomeAssistant) -> list[str]:
 
 def validate_selling_settings(data: dict, previous: dict | None = None) -> dict:
     """Validate and merge card settings; these never authorize inverter writes."""
-    settings = {**SELLING_DEFAULTS, **(previous or {})}
+    data = dict(data)
+    previous = previous or {}
+    settings = {
+        **SELLING_DEFAULTS,
+        **{key: value for key, value in previous.items() if key in SELLING_DEFAULTS},
+    }
+    # Existing installations stored the inverse option as control_enabled.
+    # Continue accepting it for service compatibility, but persist dry_run.
+    if "dry_run" not in previous and isinstance(previous.get("control_enabled"), bool):
+        settings["dry_run"] = not previous["control_enabled"]
+    legacy_control = data.pop("control_enabled", None)
     unknown = set(data) - set(SELLING_DEFAULTS)
     if unknown:
         raise HomeAssistantError(f"Unknown selling settings: {', '.join(sorted(unknown))}")
+    if legacy_control is not None:
+        if not isinstance(legacy_control, bool):
+            raise HomeAssistantError("Invalid control_enabled")
+        # If both are present (for example, a partially migrated backup),
+        # prefer the explicit current setting rather than disabling planning.
+        data.setdefault("dry_run", not legacy_control)
     settings.update(data)
     if settings["mode"] not in ("off", "semi", "automatic"):
         raise HomeAssistantError("Selling mode must be off, semi, or automatic")
@@ -201,8 +219,8 @@ def validate_selling_settings(data: dict, previous: dict | None = None) -> dict:
         value = settings[key]
         if not isinstance(value, str) or (value and not re.fullmatch(r"sensor\.[a-z0-9_]+", value)):
             raise HomeAssistantError(f"Invalid {key}")
-    if not isinstance(settings["control_enabled"], bool):
-        raise HomeAssistantError("Invalid control_enabled")
+    if not isinstance(settings["dry_run"], bool):
+        raise HomeAssistantError("Invalid dry_run")
     return settings
 
 
@@ -433,6 +451,12 @@ async def _async_start_manager(
         "error": saved_selling.get("error", ""),
         "session": saved_selling.get("session") if isinstance(saved_selling.get("session"), dict) else None,
     }
+    saved_actions = saved.get("actions")
+    actions = [
+        item for item in saved_actions[-500:]
+        if isinstance(item, dict) and isinstance(item.get("timestamp"), str)
+        and isinstance(item.get("action"), str)
+    ] if isinstance(saved_actions, list) else []
     saved_revenue = saved.get("revenue") if isinstance(saved.get("revenue"), dict) else {}
     revenue_settings = {**REVENUE_DEFAULTS, **(saved_revenue.get("settings") or {})}
     for key, value in (revenue_entities or {}).items():
@@ -477,7 +501,7 @@ async def _async_start_manager(
         await store.async_save({
             "preset_schema": 2, "presets": presets, "assignments": assignments,
             "auto_enabled": auto_enabled, "last_automatic": last_automatic,
-            "selling": selling, "revenue": revenue,
+            "selling": selling, "revenue": revenue, "actions": actions,
             CONF_WORK_MODE_ENTITY: work_mode_entity,
         })
     lock = asyncio.Lock()
@@ -504,6 +528,7 @@ async def _async_start_manager(
             "last_automatic": last_automatic,
             "selling": copy.deepcopy(selling),
             "revenue": copy.deepcopy(revenue),
+            "action_log": copy.deepcopy(actions),
             "rce_price_entities": {
                 **rce_price_entities(hass),
                 "today": selling_settings[CONF_TODAY_PRICE_ENTITY]
@@ -542,10 +567,20 @@ async def _async_start_manager(
         await store.async_save({
             "preset_schema": 2, "presets": presets, "assignments": assignments,
             "auto_enabled": auto_enabled, "last_automatic": last_automatic,
-            "selling": selling, "revenue": revenue,
+            "selling": selling, "revenue": revenue, "actions": actions,
             CONF_WORK_MODE_ENTITY: work_mode_entity,
         })
         publish()
+
+    def record_action(action: str, detail: str = "", level: str = "info") -> None:
+        """Append a bounded, persisted audit event for user-visible actions."""
+        actions.append({
+            "timestamp": dt_util.now().isoformat(timespec="seconds"),
+            "action": action,
+            "detail": detail,
+            "level": level,
+        })
+        del actions[:-500]
 
     def find_preset_id(name: str) -> str | None:
         return next((preset_id for preset_id, record in presets.items()
@@ -560,6 +595,7 @@ async def _async_start_manager(
             data = snapshot(hass, prefix)
             preset_id = preset_id or new_preset_id(presets)
             presets[preset_id] = {"name": name, "preset": data}
+            record_action("Preset saved from inverter", name)
             await persist()
 
     async def save_definition(call: ServiceCall) -> None:
@@ -575,8 +611,10 @@ async def _async_start_manager(
                     raise HomeAssistantError("Preset already exists. Use a different name.")
                 preset_id = existing_id
             data = validate_preset(call.data["preset"])
+            changed = preset_id in presets if preset_id is not None else False
             preset_id = preset_id or new_preset_id(presets)
             presets[preset_id] = {"name": name, "preset": data}
+            record_action("Preset updated" if changed else "Preset created", name)
             await persist()
 
     async def delete(call: ServiceCall) -> None:
@@ -589,6 +627,7 @@ async def _async_start_manager(
             for day in DAYS:
                 if assignments[day] == preset_id:
                     assignments[day] = ""
+            record_action("Preset deleted", name)
             await persist()
 
     async def assign(call: ServiceCall) -> None:
@@ -598,6 +637,7 @@ async def _async_start_manager(
             if name and preset_id is None:
                 raise HomeAssistantError("Preset not found")
             assignments[day] = preset_id
+            record_action("Weekday assignment changed", f"{day}: {name or 'cleared'}")
             await persist()
 
     async def apply_preset_locked(preset_id: str, skip_if_current: bool = False) -> bool:
@@ -673,11 +713,14 @@ async def _async_start_manager(
             if preset_id is None:
                 raise HomeAssistantError("Preset not found")
             await apply_preset_locked(preset_id)
+            record_action("TOU preset applied", presets[preset_id]["name"])
+            await persist()
 
     async def set_auto(call: ServiceCall) -> None:
         nonlocal auto_enabled
         async with lock:
             auto_enabled = call.data["enabled"]
+            record_action("Weekly schedule changed", "enabled" if auto_enabled else "disabled")
             await persist()
 
     async def set_selling_settings(call: ServiceCall) -> None:
@@ -698,9 +741,13 @@ async def _async_start_manager(
                     if any(item.get("manual") for item in plan.get("ranges", []))
                 }
                 selling["error"] = ""
+                record_action(
+                    "Selling settings changed",
+                    f"mode: {settings['mode']}; dry run: {'on' if settings['dry_run'] else 'off'}",
+                )
                 await persist()
-                if not settings["control_enabled"] and selling.get("session") is not None:
-                    await restore_selling_locked("inverter control disabled")
+                if settings["dry_run"] and selling.get("session") is not None:
+                    await restore_selling_locked("dry run enabled")
 
     def manual_ranges(plan: dict | None) -> list[dict]:
         """Return a safe copy of explicitly added selling hours."""
@@ -806,12 +853,17 @@ async def _async_start_manager(
                 }
                 selling["plans"][target.isoformat()] = plan
                 selling["error"] = ""
+                record_action(
+                    "Selling plan calculated",
+                    f"{target.isoformat()}: {len(plan['ranges'])} hour(s)",
+                )
             except (HomeAssistantError, SellingPlanError, KeyError, TypeError) as err:
                 if manual:
                     selling["plans"][target.isoformat()] = manual_plan(target, manual)
                 else:
                     selling["plans"].pop(target.isoformat(), None)
                 selling["error"] = str(err)
+                record_action("Selling plan failed", f"{target.isoformat()}: {err}", "warning")
                 _LOGGER.warning("Selling plan unavailable for %s: %s", target, err)
             await persist()
 
@@ -826,6 +878,7 @@ async def _async_start_manager(
             selling["plans"] = {}
             selling["error"] = ""
             selling["last_check"] = ""
+            record_action("Selling findings cleared")
             await persist()
 
     async def add_selling_range(call: ServiceCall) -> None:
@@ -870,6 +923,7 @@ async def _async_start_manager(
             else:
                 selling["plans"][date_key] = manual_plan(target, ranges)
             selling["error"] = ""
+            record_action("Manual selling hour added", f"{date_key} {start}; target SOC {target_soc:g}%")
             await persist()
 
     def range_bounds(date_key: str, selling_range: dict, now: datetime) -> tuple[datetime, datetime]:
@@ -963,6 +1017,7 @@ async def _async_start_manager(
             complete_selling_range(session["date"], session["start"], reason)
             selling["session"] = None
             selling["error"] = ""
+            record_action("Selling stopped", f"{session['date']} {session['start']}: {reason}")
             await persist()
             _LOGGER.info("Restored Deye plan after selling period: %s", reason)
         except Exception as err:
@@ -984,6 +1039,10 @@ async def _async_start_manager(
             raise HomeAssistantError("Selling range has an invalid target SOC")
         if current_soc <= minimum_soc:
             complete_selling_range(date_key, selling_range["start"], "minimum SOC before start")
+            record_action(
+                "Selling skipped",
+                f"{date_key} {selling_range['start']}: minimum SOC already reached",
+            )
             await persist()
             return
         mode = hass.states.get(work_mode_entity)
@@ -1013,6 +1072,10 @@ async def _async_start_manager(
             )
             await wait_for_selling_readback(selling["session"])
             selling["error"] = ""
+            record_action(
+                "Selling started",
+                f"{date_key} {selling_range['start']}; target SOC {minimum_soc:g}%",
+            )
             await persist()
             _LOGGER.info("Started Deye selling period %s %s", date_key, selling_range["start"])
         except Exception:
@@ -1029,8 +1092,8 @@ async def _async_start_manager(
                     end = datetime.fromisoformat(session["end"])
                     if now.tzinfo is not None and end.tzinfo is None:
                         end = end.replace(tzinfo=now.tzinfo)
-                    if not selling["settings"]["control_enabled"]:
-                        await restore_selling_locked("inverter control disabled")
+                    if selling["settings"]["dry_run"]:
+                        await restore_selling_locked("dry run enabled")
                     elif now >= end:
                         await restore_selling_locked("selling period ended")
                     elif read_battery_soc(session["battery_soc_entity"]) <= float(session["min_soc"]):
@@ -1045,7 +1108,7 @@ async def _async_start_manager(
                             # error and retains the session for the next recovery.
                             pass
                 return
-            if (not selling["settings"]["control_enabled"]
+            if (selling["settings"]["dry_run"]
                     or selling["settings"]["mode"] == "off"):
                 return
             match = current_selling_range(now)
@@ -1197,6 +1260,10 @@ async def _async_start_manager(
             if selling_range is None:
                 raise HomeAssistantError("Selling range not found")
             selling_range["approved"] = call.data["approved"]
+            record_action(
+                "Selling hour approval changed",
+                f"{date_key} {selling_range['start']}: {'approved' if call.data['approved'] else 'unapproved'}",
+            )
             await persist()
             session = selling.get("session")
             if (not call.data["approved"] and isinstance(session, dict)
@@ -1222,6 +1289,7 @@ async def _async_start_manager(
             if selling_range is None:
                 raise HomeAssistantError("Selling range not found")
             selling_range["target_soc"] = target_soc
+            record_action("Selling target SOC changed", f"{date_key} {start}: {target_soc:g}%")
             await persist()
 
     async def stop_selling(_call: ServiceCall) -> None:
@@ -1234,8 +1302,8 @@ async def _async_start_manager(
     async def restart_selling(call: ServiceCall) -> None:
         """Explicitly restart a completed period while its hour is still active."""
         async with lock:
-            if selling["settings"]["mode"] == "off" or not selling["settings"]["control_enabled"]:
-                raise HomeAssistantError("Enable selling mode and inverter control before restarting")
+            if selling["settings"]["mode"] == "off" or selling["settings"]["dry_run"]:
+                raise HomeAssistantError("Enable selling mode and turn off dry run before restarting")
             if selling.get("session") is not None:
                 raise HomeAssistantError("A selling period is already active")
             date_key, start = call.data["date"], call.data["start"]
@@ -1250,6 +1318,7 @@ async def _async_start_manager(
             selling_range["completed"] = False
             selling_range.pop("completion_reason", None)
             selling_range["approved"] = True
+            record_action("Selling period restarted", f"{date_key} {start}")
             await persist()
             await start_selling_locked(date_key, selling_range, now)
 
@@ -1295,8 +1364,11 @@ async def _async_start_manager(
                 changed = await apply_preset_locked(preset_id, skip_if_current=True)
                 result = f"applied {name} ({reason})" if changed else f"{name} already active"
                 last_automatic = f"{dt_util.now():%Y-%m-%d %H:%M} · {result}"
+                if changed:
+                    record_action("TOU preset applied automatically", f"{name}; {reason}")
             except Exception as err:
                 last_automatic = f"{dt_util.now():%Y-%m-%d %H:%M} · ERROR {name}: {err}"
+                record_action("Automatic TOU apply failed", f"{name}: {err}", "error")
                 _LOGGER.exception("Automatic Deye TOU apply failed for %s", name)
             await persist()
 
@@ -1324,8 +1396,11 @@ async def _async_start_manager(
     hass.services.async_register(DOMAIN, "set_auto", set_auto, schema=vol.Schema({
         vol.Required("enabled"): bool,
     }))
+    selling_settings_schema = {vol.Optional(key): object for key in SELLING_DEFAULTS}
+    # Keep the former service field working for existing automations.
+    selling_settings_schema[vol.Optional("control_enabled")] = bool
     hass.services.async_register(DOMAIN, "set_selling_settings", set_selling_settings,
-        schema=vol.Schema({vol.Optional(key): object for key in SELLING_DEFAULTS}))
+        schema=vol.Schema(selling_settings_schema))
     hass.services.async_register(DOMAIN, "refresh_selling_plan", refresh_selling_plan,
         schema=vol.Schema({vol.Optional("day", default="tomorrow"): vol.In(("today", "tomorrow"))}))
     hass.services.async_register(DOMAIN, "clear_selling_plans", clear_selling_plans)

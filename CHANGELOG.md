@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0
+
+- Replaced the live-control opt-in with a confirmed Dry run control that is enabled by default.
+- Added a persisted, paged action-log dashboard card for preset, plan, selling, and inverter events.
+
 ## 1.0.0
 
 - First stable HACS release of Deye TOU Manager.

@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "1.0.0";
+const CARD_TRANSLATION_VERSION = "1.1.0";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -424,6 +424,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     const attributes = this._hass?.states["sensor.deye_tou_preset_manager"]?.attributes;
     const selling = attributes?.selling;
     const settings = this._settingsDraft || selling?.settings || {};
+    const dryRun = settings.dry_run !== false;
     const detected = attributes?.rce_price_entities || {};
     const dateKeyFor = day => {
       const date = new Date(`${attributes?.ha_local_date || new Date().toISOString().slice(0,10)}T12:00:00`);
@@ -467,7 +468,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     </div><div class="actions"><button class="primary" id="selling-add-manual">${this.h("sellingAddManualButton")}</button><button id="selling-manual-cancel">${this.h("sellingCancel")}</button></div>
     <p class="muted">${this.h("sellingManualFormNote")}</p></section></div>` : "";
     this.shadowRoot.innerHTML = `<style>
-      ha-card{padding:20px;color:var(--primary-text-color)}h2,h3{margin:0 0 10px}h3{font-size:16px}
+      ha-card{padding:20px;color:var(--primary-text-color);background:var(--card-background-color)}ha-card.dry-run{background:var(--secondary-background-color)}ha-card.live-control{background:rgba(244,67,54,.08);border:1px solid var(--error-color)}h2,h3{margin:0 0 10px}h3{font-size:16px}
       .header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
       .muted{color:var(--secondary-text-color);font-size:13px;line-height:1.5}
       .warning{color:var(--warning-color);font-size:13px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
@@ -477,20 +478,21 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       button.primary{background:var(--primary-color);color:var(--text-primary-color);border:0}
       .actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.range{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--divider-color);padding:10px;border-radius:8px;margin:7px 0}.range-soc{max-width:150px}.stop{border-color:var(--error-color);color:var(--error-color)}
       .range small{width:100%;color:var(--secondary-text-color)}section{border-top:1px solid var(--divider-color);padding-top:14px;margin-top:14px}
-      .approval,.control-toggle{flex-direction:row;align-items:center;margin-top:12px}.approval input,.control-toggle input{width:18px;min-height:18px}
+      .approval{flex-direction:row;align-items:center;margin-top:12px}.approval input{width:18px;min-height:18px}
+      .dry-run-toggle{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;gap:10px;padding:14px;border:2px solid var(--divider-color);border-radius:9px;font-weight:700;font-size:15px;background:var(--secondary-background-color)}.dry-run-toggle input{width:22px;min-height:22px}.dry-run-toggle.live{border-color:var(--error-color);background:rgba(244,67,54,.13);color:var(--primary-text-color)}
       .language-picker{display:flex;flex-direction:row;align-items:center}.language-picker select{width:auto;min-height:32px}
       .modal-backdrop{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45)}.manual-modal{width:min(460px,100%);margin:0;padding:18px;border:0;border-radius:10px;background:var(--card-background-color);box-shadow:var(--ha-card-box-shadow,0 2px 12px rgba(0,0,0,.35))}
       #status{min-height:18px;font-size:12px;color:var(--success-color)}#status.error{color:var(--error-color)}
       @media(max-width:560px){.grid{grid-template-columns:1fr}ha-card{padding:15px}}
-    </style><ha-card><div class="header"><h2>${this.h("sellingTitle")}</h2>
+    </style><ha-card class="${dryRun ? "dry-run" : "live-control"}"><div class="header"><h2>${this.h("sellingTitle")}</h2>
       <label class="language-picker">${this.h("language")}<select id="selling-language">
         ${[["auto","languageAuto"],["en","languageEnglish"],["pl","languagePolish"]].map(([value,key]) =>
           `<option value="${value}" ${this._languageChoice === value ? "selected" : ""}>${this.h(key)}</option>`).join("")}
       </select></label></div>
-      <p class="warning">${settings.control_enabled ? this.h("sellingControlEnabledWarning") : this.h("sellingPreviewOnly")}</p>
+      <p class="warning">${dryRun ? this.h("sellingDryRunWarning") : this.h("sellingLiveControlWarning")}</p>
       ${!selling ? `<p class="muted">${this.h("missingSensor")}</p>` : `<div class="grid">
         ${select("sell-mode","sellingMode",settings.mode,[["off","sellingOff"],["semi","sellingSemi"],["automatic","sellingAutomatic"]])}
-        ${checkbox("sell-control","sellingControlEnabled",settings.control_enabled)}
+        <label class="dry-run-toggle ${dryRun ? "" : "live"}"><input id="sell-dry-run" type="checkbox" ${dryRun ? "checked" : ""}>${this.h("sellingDryRun")}</label>
         ${field("sell-threshold","sellingThreshold","number",settings.threshold,'min="0" step="0.01"')}
         ${field("sell-ranges","sellingMaxRanges","number",settings.max_ranges,'min="1" max="6" step="1"')}
         ${select("sell-period","sellingPeriod",settings.time_of_day,[["morning","sellingMorning"],["afternoon","sellingAfternoon"],["evening","sellingEvening"],["any","sellingAny"]])}
@@ -514,17 +516,17 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       try { window.localStorage?.setItem(CARD_LANGUAGE_KEY, this._languageChoice); } catch (_) { /* unavailable */ }
       this.updateLanguage(); this.render();
     });
-    const ids = ["sell-mode","sell-control","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power"];
+    const ids = ["sell-mode","sell-dry-run","sell-threshold","sell-ranges","sell-period","sell-soc","sell-power"];
     const readSettings = () => ({
-      mode:$("sell-mode").value, control_enabled:$("sell-control").checked,
+      mode:$("sell-mode").value, dry_run:$("sell-dry-run").checked,
       threshold:Number($("sell-threshold").value),
       max_ranges:Number($("sell-ranges").value), time_of_day:$("sell-period").value,
       min_soc:Number($("sell-soc").value), power_override:$("sell-power").value === "" ? null : Number($("sell-power").value)
     });
     ids.forEach(id => $(id)?.addEventListener("change", () => { this._settingsDraft = readSettings(); }));
-    $("sell-control")?.addEventListener("change", event => {
-      if (event.target.checked && !window.confirm(this.tr("sellingControlConfirm"))) {
-        event.target.checked = false;
+    $("sell-dry-run")?.addEventListener("change", event => {
+      if (!event.target.checked && !window.confirm(this.tr("sellingLiveControlConfirm"))) {
+        event.target.checked = true;
         this._settingsDraft = readSettings();
       }
     });
@@ -661,3 +663,38 @@ if (!customElements.get("deye-tou-selling-history-card"))
   customElements.define("deye-tou-selling-history-card", DeyeTouSellingHistoryCard);
 if (!window.customCards.some(card => card.type === "deye-tou-selling-history-card"))
   window.customCards.push({type:"deye-tou-selling-history-card",name:"Deye TOU Selling History",description:"Hourly net export and revenue history"});
+
+class DeyeTouActionLogCard extends DeyeTouManagerCard {
+  constructor() {
+    super();
+    this._page = 0;
+  }
+  getCardSize() { return 8; }
+  static getStubConfig() { return {type:"custom:deye-tou-action-log-card"}; }
+  render() {
+    if (!this._texts) {
+      this.shadowRoot.innerHTML = this._translationError
+        ? "<ha-card>Unable to load card translations. Check the integration installation.</ha-card>"
+        : '<ha-card aria-busy="true"></ha-card>';
+      return;
+    }
+    const attributes = this._hass?.states["sensor.deye_tou_preset_manager"]?.attributes;
+    const events = Array.isArray(attributes?.action_log) ? [...attributes.action_log].reverse() : [];
+    const pageSize = 25;
+    const pages = Math.max(1, Math.ceil(events.length / pageSize));
+    this._page = Math.min(this._page, pages - 1);
+    const records = events.slice(this._page * pageSize, (this._page + 1) * pageSize);
+    const rows = records.map(event => `<tr class="${this.escape(event.level || "info")}"><td>${this.escape(String(event.timestamp || "").replace("T", " "))}</td><td>${this.escape(event.action || "—")}</td><td>${this.escape(event.detail || "—")}</td></tr>`).join("");
+    this.shadowRoot.innerHTML = `<style>
+      :host{display:block;color:var(--primary-text-color)}ha-card{display:block;padding:20px;background:var(--card-background-color)}h2{font-size:20px;margin:0 0 4px}.muted{font-size:13px;color:var(--secondary-text-color);line-height:1.5}.scroll{overflow-x:auto}.log-table{width:100%;border-collapse:collapse}.log-table th,.log-table td{padding:9px 7px;border-bottom:1px solid var(--divider-color);text-align:left;font-size:13px;vertical-align:top}.log-table th{color:var(--secondary-text-color);font-weight:600}.log-table tr.warning td:first-child{color:var(--warning-color)}.log-table tr.error td:first-child{color:var(--error-color)}.log-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 10px}button{min-width:40px;min-height:36px;border:1px solid var(--divider-color);border-radius:7px;background:var(--secondary-background-color);color:var(--primary-text-color);font:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:default}@media(max-width:560px){ha-card{padding:15px}.log-table th,.log-table td{font-size:12px;padding:8px 5px}}
+    </style><ha-card><h2>${this.h("actionLogTitle")}</h2><p class="muted">${this.h("actionLogSubtitle")}</p>
+      ${!attributes ? `<p class="muted">${this.h("missingSensor")}</p>` : !events.length ? `<p class="muted">${this.h("actionLogEmpty")}</p>` : `<div class="log-nav"><button id="log-newer" ${this._page === 0 ? "disabled" : ""}>‹</button><b>${this._page + 1} / ${pages}</b><button id="log-older" ${this._page >= pages - 1 ? "disabled" : ""}>›</button></div><div class="scroll"><table class="log-table"><thead><tr><th>${this.h("actionLogTimestamp")}</th><th>${this.h("actionLogAction")}</th><th>${this.h("actionLogDetail")}</th></tr></thead><tbody>${rows}</tbody></table></div>`}
+    </ha-card>`;
+    this.shadowRoot.getElementById("log-newer")?.addEventListener("click", () => { this._page--; this.render(); });
+    this.shadowRoot.getElementById("log-older")?.addEventListener("click", () => { this._page++; this.render(); });
+  }
+}
+if (!customElements.get("deye-tou-action-log-card"))
+  customElements.define("deye-tou-action-log-card", DeyeTouActionLogCard);
+if (!window.customCards.some(card => card.type === "deye-tou-action-log-card"))
+  window.customCards.push({type:"custom:deye-tou-action-log-card",name:"Deye TOU Action Log",description:"Persisted inverter and planning actions"});
