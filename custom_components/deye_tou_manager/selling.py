@@ -73,7 +73,7 @@ def hourly_prices(records: list[dict], day: date, unit: str) -> list[float]:
 
 def make_sell_plan(
     records: list[dict], day: date, unit: str, *, threshold: float,
-    max_ranges: int, time_of_day: str,
+    max_ranges: int, time_of_day: str, now: datetime | None = None,
 ) -> dict:
     """Choose individual one-hour blocks above the configured threshold.
 
@@ -83,8 +83,8 @@ def make_sell_plan(
     """
     if not isinstance(max_ranges, int) or isinstance(max_ranges, bool) or not 1 <= max_ranges <= 6:
         raise SellingPlanError("Range count must be between 1 and 6")
-    if time_of_day not in ("morning", "afternoon", "any"):
-        raise SellingPlanError("Time of day must be morning, afternoon, or any")
+    if time_of_day not in ("morning", "afternoon", "evening", "any"):
+        raise SellingPlanError("Time of day must be morning, afternoon, evening, or any")
     try:
         threshold = float(threshold)
     except (TypeError, ValueError) as err:
@@ -93,15 +93,18 @@ def make_sell_plan(
         raise SellingPlanError("Price threshold must be finite and non-negative")
     prices = hourly_prices(records, day, unit)
     permitted = range(0, 12) if time_of_day == "morning" else (
-        range(12, 24) if time_of_day == "afternoon" else range(24)
+        range(12, 24) if time_of_day == "afternoon" else (
+            range(16, 24) if time_of_day == "evening" else range(24)
+        )
     )
+    past_hours = set(range(now.hour + 1)) if now is not None and day == now.date() else set()
     candidates = [
         {
             "start": f"{hour:02d}:00", "end": f"{hour + 1:02d}:00",
             "average_price": round(prices[hour], 6),
             "hours": [{"start": f"{hour:02d}:00", "price": round(prices[hour], 6)}],
         }
-        for hour in permitted if prices[hour] >= threshold
+        for hour in permitted if hour not in past_hours and prices[hour] >= threshold
     ]
     selected = sorted(candidates, key=lambda item: (-item["average_price"], item["start"]))[:max_ranges]
     selected.sort(key=lambda item: item["start"])

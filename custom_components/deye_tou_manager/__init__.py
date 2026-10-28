@@ -45,7 +45,7 @@ LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
-CARD_VERSION = "0.6.4"
+CARD_VERSION = "0.6.5"
 CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
 CARD_TRANSLATION_URL = "/api/deye_tou_manager/card-{language}.json"
@@ -173,8 +173,8 @@ def validate_selling_settings(data: dict, previous: dict | None = None) -> dict:
     settings.update(data)
     if settings["mode"] not in ("off", "semi", "automatic"):
         raise HomeAssistantError("Selling mode must be off, semi, or automatic")
-    if settings["time_of_day"] not in ("morning", "afternoon", "any"):
-        raise HomeAssistantError("Selling time must be morning, afternoon, or any")
+    if settings["time_of_day"] not in ("morning", "afternoon", "evening", "any"):
+        raise HomeAssistantError("Selling time must be morning, afternoon, evening, or any")
     for key in ("threshold", "min_soc"):
         try:
             value = float(settings[key])
@@ -376,7 +376,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime["unsub_revenue_hour"]()
     for service in ("save_current", "save_definition", "delete", "assign_day", "apply", "set_auto",
                     "set_selling_settings", "refresh_selling_plan", "clear_selling_plans",
-                    "add_selling_range", "approve_selling_range"):
+                    "add_selling_range", "approve_selling_range", "set_selling_range_soc",
+                    "stop_selling"):
         hass.services.async_remove(DOMAIN, service)
     hass.states.async_remove(ENTITY)
     hass.states.async_remove(REVENUE_ENTITY)
@@ -750,7 +751,7 @@ async def _async_start_manager(
                     state.attributes.get("prices"), target,
                     state.attributes.get("unit_of_measurement"),
                     threshold=settings["threshold"], max_ranges=settings["max_ranges"],
-                    time_of_day=settings["time_of_day"],
+                    time_of_day=settings["time_of_day"], now=now,
                 )
                 plan["source_entity"] = entity_id
                 # A manual hour takes precedence over a suggested hour at the
@@ -778,6 +779,13 @@ async def _async_start_manager(
                 for selling_range in plan["ranges"]:
                     old_range = next((item for item in previous.get("ranges", [])
                                       if item.get("start") == selling_range["start"]), {})
+                    try:
+                        target_soc = float(old_range.get("target_soc", settings["min_soc"]))
+                    except (TypeError, ValueError):
+                        target_soc = float(settings["min_soc"])
+                    selling_range["target_soc"] = (
+                        target_soc if 0 <= target_soc <= 100 else float(settings["min_soc"])
+                    )
                     selling_range["approved"] = bool(
                         settings["mode"] != "off" and (
                             (preserve_approval and old_range.get("approved"))
@@ -839,10 +847,16 @@ async def _async_start_manager(
             if any(ranges_overlap(item["start"], start) for item in ranges):
                 raise HomeAssistantError("A manual selling hour already overlaps this time")
             hour, minute = (int(part) for part in start.split(":"))
+            try:
+                target_soc = float(call.data.get("target_soc", selling["settings"]["min_soc"]))
+            except (TypeError, ValueError) as err:
+                raise HomeAssistantError("Target SOC must be a number") from err
+            if not math.isfinite(target_soc) or not 0 <= target_soc <= 100:
+                raise HomeAssistantError("Target SOC must be between 0 and 100")
             ranges.append({
                 "start": start, "end": f"{(hour + 1) % 24:02d}:{minute:02d}",
                 "ends_next_day": hour == 23, "average_price": None, "hours": [],
-                "manual": True, "approved": False,
+                "manual": True, "approved": False, "target_soc": target_soc,
             })
             if plan:
                 plan["ranges"] = sorted(
@@ -959,7 +973,12 @@ async def _async_start_manager(
         settings = selling["settings"]
         soc_entity = settings[CONF_BATTERY_SOC_ENTITY]
         current_soc = read_battery_soc(soc_entity)
-        minimum_soc = float(settings["min_soc"])
+        try:
+            minimum_soc = float(selling_range.get("target_soc", settings["min_soc"]))
+        except (TypeError, ValueError) as err:
+            raise HomeAssistantError("Selling range has an invalid target SOC") from err
+        if not math.isfinite(minimum_soc) or not 0 <= minimum_soc <= 100:
+            raise HomeAssistantError("Selling range has an invalid target SOC")
         if current_soc <= minimum_soc:
             complete_selling_range(date_key, selling_range["start"], "minimum SOC before start")
             await persist()
@@ -1181,6 +1200,34 @@ async def _async_start_manager(
                     and session.get("date") == date_key and session.get("start") == call.data["start"]):
                 await restore_selling_locked("approval withdrawn")
 
+    async def set_selling_range_soc(call: ServiceCall) -> None:
+        """Set the stop-SOC for one proposed or manual selling period."""
+        async with lock:
+            try:
+                target_soc = float(call.data["target_soc"])
+            except (TypeError, ValueError) as err:
+                raise HomeAssistantError("Target SOC must be a number") from err
+            if not math.isfinite(target_soc) or not 0 <= target_soc <= 100:
+                raise HomeAssistantError("Target SOC must be between 0 and 100")
+            date_key, start = call.data["date"], call.data["start"]
+            session = selling.get("session")
+            if (isinstance(session, dict) and session.get("date") == date_key
+                    and session.get("start") == start):
+                raise HomeAssistantError("Stop the active selling period before changing its SOC")
+            selling_range = next((item for item in selling["plans"].get(date_key, {}).get("ranges", [])
+                                  if item.get("start") == start), None)
+            if selling_range is None:
+                raise HomeAssistantError("Selling range not found")
+            selling_range["target_soc"] = target_soc
+            await persist()
+
+    async def stop_selling(_call: ServiceCall) -> None:
+        """Manually stop the active selling period and prevent its restart."""
+        async with lock:
+            if not isinstance(selling.get("session"), dict):
+                raise HomeAssistantError("No selling period is currently active")
+            await restore_selling_locked("stopped manually")
+
     async def run_scheduled(reason: str) -> None:
         """Apply today's assignment after ESPHome reconnects, if enabled."""
         nonlocal last_automatic
@@ -1260,11 +1307,18 @@ async def _async_start_manager(
     hass.services.async_register(DOMAIN, "add_selling_range", add_selling_range,
         schema=vol.Schema({
             vol.Required("date"): str, vol.Required("start"): str,
+            vol.Optional("target_soc"): object,
         }))
     hass.services.async_register(DOMAIN, "approve_selling_range", approve_selling_range,
         schema=vol.Schema({
             vol.Required("date"): str, vol.Required("start"): str, vol.Required("approved"): bool,
         }))
+    hass.services.async_register(DOMAIN, "set_selling_range_soc", set_selling_range_soc,
+        schema=vol.Schema({
+            vol.Required("date"): str, vol.Required("start"): str,
+            vol.Required("target_soc"): object,
+        }))
+    hass.services.async_register(DOMAIN, "stop_selling", stop_selling)
 
     @callback
     def at_midnight(_now) -> None:

@@ -841,11 +841,12 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
             await self.call("set_selling_settings", mode="semi", threshold=.5,
                             max_ranges=2, time_of_day="afternoon", min_soc=30)
-            await self.call("add_selling_range", date="2026-10-27", start="18:15")
+            await self.call("add_selling_range", date="2026-10-27", start="18:15", target_soc=45)
             await self.call("refresh_selling_plan", day="tomorrow")
         plan = self.hass.saved["selling"]["plans"]["2026-10-27"]
         manual = next(item for item in plan["ranges"] if item.get("manual"))
         self.assertEqual((manual["start"], manual["end"]), ("18:15", "19:15"))
+        self.assertEqual(manual["target_soc"], 45)
         self.assertFalse(manual["approved"])
         await self.call("approve_selling_range", date="2026-10-27", start="18:15", approved=True)
         with patch.object(MANAGER.dt_util, "now", return_value=datetime(2026, 10, 26, 18)):
@@ -853,6 +854,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         manual = next(item for item in self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"]
                       if item.get("manual"))
         self.assertTrue(manual["approved"])
+        self.assertEqual(manual["target_soc"], 45)
         await self.call("set_selling_settings", threshold=.7)
         retained = self.hass.saved["selling"]["plans"]["2026-10-27"]["ranges"]
         self.assertEqual(len(retained), 1)
@@ -868,16 +870,17 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             await self.call("set_selling_settings", mode="semi", control_enabled=True,
                             min_soc=35, battery_soc_entity=soc_entity)
             await self.call("add_selling_range", date="2026-10-26", start="18:15")
+            await self.call("set_selling_range_soc", date="2026-10-26", start="18:15", target_soc=42)
             await self.call("approve_selling_range", date="2026-10-26", start="18:15", approved=True)
             self.hass.selling_tick_callback(None)
             await self.hass.finish_tasks()
         work_mode = MANAGER.eid(TEST_PREFIX, "select", "system_work_mode")
         active_soc = MANAGER.slot_id(TEST_PREFIX, "number", 5, "soc")
         self.assertEqual(self.hass.states[work_mode].state, "Selling First")
-        self.assertEqual(self.hass.states[active_soc].state, "35.0")
+        self.assertEqual(self.hass.states[active_soc].state, "42.0")
         self.assertEqual(self.hass.saved["selling"]["session"]["slot"], 4)
         self.assertEqual(self.hass.saved["selling"]["session"]["snapshot"], sample_preset())
-        self.hass.states.async_set(soc_entity, "35")
+        self.hass.states.async_set(soc_entity, "42")
         with patch.object(MANAGER.dt_util, "now", return_value=now + timedelta(minutes=5)):
             self.hass.selling_tick_callback(None)
             await self.hass.finish_tasks()
@@ -892,6 +895,25 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             self.hass.selling_tick_callback(None)
             await self.hass.finish_tasks()
         self.assertEqual(len(self.hass.services.writes), writes_after_stop)
+
+    async def test_stop_selling_restores_and_completes_active_period(self):
+        soc_entity = "sensor.deye_inverter_esp32_battery_bms_soc"
+        self.hass.states.async_set(soc_entity, "80")
+        now = datetime(2026, 10, 26, 18, 20)
+        with patch.object(MANAGER.dt_util, "now", return_value=now):
+            await self.call("set_selling_settings", mode="semi", control_enabled=True,
+                            min_soc=35, battery_soc_entity=soc_entity)
+            await self.call("add_selling_range", date="2026-10-26", start="18:15")
+            await self.call("approve_selling_range", date="2026-10-26", start="18:15", approved=True)
+            self.hass.selling_tick_callback(None)
+            await self.hass.finish_tasks()
+            await self.call("stop_selling")
+        work_mode = MANAGER.eid(TEST_PREFIX, "select", "system_work_mode")
+        self.assertEqual(self.hass.states[work_mode].state, "Zero Export To CT")
+        selling_range = self.hass.saved["selling"]["plans"]["2026-10-26"]["ranges"][0]
+        self.assertTrue(selling_range["completed"])
+        self.assertEqual(selling_range["completion_reason"], "stopped manually")
+        self.assertIsNone(self.hass.saved["selling"]["session"])
 
     async def test_startup_recovers_an_interrupted_selling_session(self):
         snapshot = sample_preset()

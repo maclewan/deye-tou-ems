@@ -122,6 +122,7 @@ set_selling_settings:
           options:
             - morning
             - afternoon
+            - evening
             - any
     min_soc:
       name: Minimum battery SOC
@@ -179,6 +180,13 @@ add_selling_range:
       required: true
       selector:
         text:
+    target_soc:
+      name: Target battery SOC
+      description: Stop selling and restore the inverter plan when this SOC is reached.
+      selector:
+        number:
+          min: 0
+          max: 100
 approve_selling_range:
   name: Approve selling hour
   description: Approve or unapprove one semi-automatic one-hour selling block. Does not change the inverter.
@@ -189,7 +197,7 @@ approve_selling_range:
       selector:
         text:
     start:
-      name: Selling hour start (HH:MM)
+      name: Start time (HH:MM)
       required: true
       selector:
         text:
@@ -198,3 +206,27 @@ approve_selling_range:
       required: true
       selector:
         boolean:
+set_selling_range_soc:
+  name: Set selling-period target SOC
+  description: Set the SOC at which this individual selling period stops. The active period must be stopped first.
+  fields:
+    date:
+      name: Plan date (YYYY-MM-DD)
+      required: true
+      selector:
+        text:
+    start:
+      name: Start time (HH:MM)
+      required: true
+      selector:
+        text:
+    target_soc:
+      name: Target battery SOC
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+stop_selling:
+  name: Stop active selling
+  description: Restore the previous Work Mode and TOU SOC, then mark the active selling period complete.

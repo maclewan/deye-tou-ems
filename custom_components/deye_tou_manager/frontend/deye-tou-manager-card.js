@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.6.4";
+const CARD_TRANSLATION_VERSION = "0.6.5";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -410,6 +410,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
   constructor() {
     super();
     this._settingsDraft = null;
+    this._manualDialogDay = "";
   }
   getCardSize() { return 9; }
   static getStubConfig() { return {type:"custom:deye-tou-selling-card"}; }
@@ -444,17 +445,27 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     const planHtml = day => {
       const dateKey = dateKeyFor(day);
       const plan = selling?.plans?.[dateKey];
-      if (!plan) return `<section><h3>${this.h(day === "today" ? "sellingToday" : "sellingTomorrow")}</h3><p class="muted">${this.h("sellingNoPlan")}</p></section>`;
-      return `<section><h3>${this.h(day === "today" ? "sellingToday" : "sellingTomorrow")} · ${this.escape(plan.date)}</h3>
+      const title = this.h(day === "today" ? "sellingToday" : "sellingTomorrow");
+      const addManual = `<div class="actions"><button data-open-manual="${day}">${this.h("sellingAddManual")}</button></div>`;
+      if (!plan) return `<section><h3>${title}</h3><p class="muted">${this.h("sellingNoPlan")}</p>${addManual}</section>`;
+      return `<section><h3>${title} · ${this.escape(plan.date)}</h3>
         <p class="muted">${this.h("sellingSource")}: ${this.escape(plan.source_entity)}</p>
         ${plan.ranges?.length ? plan.ranges.map(range => `<div class="range"><b>${this.escape(range.start)}–${this.escape(range.end)}${range.ends_next_day ? this.h("nextDay") : ""}</b>
           <span>${range.manual ? this.h("sellingManual") : `${this.h("sellingAverage")}: ${this.escape(range.average_price)} PLN/kWh`}</span>
-          <label class="approval"><input type="checkbox" data-approve-date="${dateKey}" data-approve-start="${this.escape(range.start)}" ${range.approved ? "checked" : ""}
-            ${settings.mode === "semi" ? "" : "disabled"}>${this.h("sellingApproved")}</label>
+          ${(() => { const active = selling.session?.date === dateKey && selling.session?.start === range.start;
+            const targetSoc = Number.isFinite(Number(range.target_soc)) ? Number(range.target_soc) : settings.min_soc;
+            return `<label class="range-soc">${this.h("sellingTargetSoc")}<input type="number" min="0" max="100" step="1" data-range-soc-date="${dateKey}" data-range-soc-start="${this.escape(range.start)}" value="${this.escape(targetSoc)}" ${active ? "disabled" : ""}></label>
+              ${active ? `<button class="stop" data-stop-selling>${this.h("sellingStop")}</button>` : `<label class="approval"><input type="checkbox" data-approve-date="${dateKey}" data-approve-start="${this.escape(range.start)}" ${range.approved ? "checked" : ""}
+                ${settings.mode === "semi" ? "" : "disabled"}>${this.h("sellingApproved")}</label>`}`; })()}
           <small>${range.manual ? this.h("sellingManualNote") : range.hours.map(hour => `${this.escape(hour.start)} ${this.escape(hour.price)}`).join(" · ")}</small></div>`).join("")
-          : `<p class="muted">${this.h("sellingBelowThreshold")}</p>`}
+          : `<p class="muted">${this.h("sellingBelowThreshold")}</p>`}${addManual}
       </section>`;
     };
+    const manualDialog = this._manualDialogDay ? `<div class="modal-backdrop"><section class="manual-modal" role="dialog" aria-modal="true"><h3>${this.h("sellingAddManual")}</h3><div class="grid">
+      ${select("selling-manual-start","sellingManualHour","",manualStartOptions)}
+      ${field("selling-manual-soc","sellingTargetSoc","number",settings.min_soc,'min="0" max="100" step="1"')}
+    </div><div class="actions"><button class="primary" id="selling-add-manual">${this.h("sellingAddManualButton")}</button><button id="selling-manual-cancel">${this.h("sellingCancel")}</button></div>
+    <p class="muted">${this.h("sellingManualFormNote")}</p></section></div>` : "";
     this.shadowRoot.innerHTML = `<style>
       ha-card{padding:20px;color:var(--primary-text-color)}h2,h3{margin:0 0 10px}h3{font-size:16px}
       .header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
@@ -464,10 +475,11 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       input,select{width:100%;padding:7px;border:1px solid var(--divider-color);border-radius:7px;background:var(--card-background-color);color:var(--primary-text-color)}
       button{border:1px solid var(--divider-color);border-radius:7px;padding:7px 12px;background:var(--secondary-background-color);color:var(--primary-text-color);cursor:pointer}
       button.primary{background:var(--primary-color);color:var(--text-primary-color);border:0}
-      .actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.range{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--divider-color);padding:10px;border-radius:8px;margin:7px 0}
+      .actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.range{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border:1px solid var(--divider-color);padding:10px;border-radius:8px;margin:7px 0}.range-soc{max-width:150px}.stop{border-color:var(--error-color);color:var(--error-color)}
       .range small{width:100%;color:var(--secondary-text-color)}section{border-top:1px solid var(--divider-color);padding-top:14px;margin-top:14px}
       .approval,.control-toggle{flex-direction:row;align-items:center;margin-top:12px}.approval input,.control-toggle input{width:18px;min-height:18px}
       .language-picker{display:flex;flex-direction:row;align-items:center}.language-picker select{width:auto;min-height:32px}
+      .modal-backdrop{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.45)}.manual-modal{width:min(460px,100%);margin:0;padding:18px;border:0;border-radius:10px;background:var(--card-background-color);box-shadow:var(--ha-card-box-shadow,0 2px 12px rgba(0,0,0,.35))}
       #status{min-height:18px;font-size:12px;color:var(--success-color)}#status.error{color:var(--error-color)}
       @media(max-width:560px){.grid{grid-template-columns:1fr}ha-card{padding:15px}}
     </style><ha-card><div class="header"><h2>${this.h("sellingTitle")}</h2>
@@ -481,7 +493,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
         ${checkbox("sell-control","sellingControlEnabled",settings.control_enabled)}
         ${field("sell-threshold","sellingThreshold","number",settings.threshold,'min="0" step="0.01"')}
         ${field("sell-ranges","sellingMaxRanges","number",settings.max_ranges,'min="1" max="6" step="1"')}
-        ${select("sell-period","sellingPeriod",settings.time_of_day,[["morning","sellingMorning"],["afternoon","sellingAfternoon"],["any","sellingAny"]])}
+        ${select("sell-period","sellingPeriod",settings.time_of_day,[["morning","sellingMorning"],["afternoon","sellingAfternoon"],["evening","sellingEvening"],["any","sellingAny"]])}
         ${field("sell-soc","sellingMinSoc","number",settings.min_soc,'min="0" max="100" step="1"')}
         ${field("sell-power","sellingPower","number",settings.power_override,'min="1" max="12000" step="1"')}
       </div><div class="actions"><button class="primary" id="sell-save">${this.h("sellingSave")}</button>
@@ -492,14 +504,9 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
       <p class="muted">${this.h("sellingEntityConfigNote", {today:detected.today || this.tr("sellingAutoDetect"), tomorrow:detected.tomorrow || this.tr("sellingAutoDetect")})}</p>
       <p class="muted">${this.h("sellingSocConfigNote", {entity:settings.battery_soc_entity || this.tr("sellingSocAutoDetect")})}</p>
       <p class="muted">${this.h("sellingScheduleNote")}</p>
-      <section><h3>${this.h("sellingAddManual")}</h3><div class="grid">
-        ${select("selling-manual-day","sellingManualDay","today",[["today","sellingManualToday"],["tomorrow","sellingManualTomorrow"]])}
-        ${select("selling-manual-start","sellingManualHour","",manualStartOptions)}
-      </div><div class="actions"><button id="selling-add-manual">${this.h("sellingAddManualButton")}</button></div>
-      <p class="muted">${this.h("sellingManualFormNote")}</p></section>
       ${selling.error ? `<p class="warning">${this.escape(selling.error)}</p>` : ""}
       ${selling.session ? `<p class="warning">${this.h("sellingActive", {start:selling.session.start, end:selling.session.end})}</p>` : ""}
-      ${planHtml("today")}${planHtml("tomorrow")}`}
+      ${planHtml("today")}${planHtml("tomorrow")}${manualDialog}`}
       <div id="status" role="status"></div></ha-card>`;
     const $ = id => this.shadowRoot.getElementById(id);
     $("selling-language")?.addEventListener("change", event => {
@@ -535,15 +542,39 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     $("sell-check-today")?.addEventListener("click", () => saveAndCheck("today"));
     $("sell-check-tomorrow")?.addEventListener("click", () => saveAndCheck("tomorrow"));
     $("sell-clear")?.addEventListener("click", () => this.act("clear_selling_plans", {}));
+    this.shadowRoot.querySelectorAll("[data-open-manual]").forEach(el => el.addEventListener("click", () => {
+      this._manualDialogDay = el.dataset.openManual;
+      this.render();
+    }));
+    $("selling-manual-cancel")?.addEventListener("click", () => {
+      this._manualDialogDay = "";
+      this.render();
+    });
     $("selling-add-manual")?.addEventListener("click", () => {
-      const day = $("selling-manual-day").value;
       const start = $("selling-manual-start").value;
-      if (!/^(?:[01]\\d|2[0-3]):(?:00|15|30|45)$/.test(start)) {
+      const targetSoc = Number($("selling-manual-soc").value);
+      if (!/^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(start)) {
         this.status(this.tr("sellingManualHourError"), true);
         return;
       }
-      this.act("add_selling_range", {date:dateKeyFor(day), start});
+      if (!Number.isFinite(targetSoc) || targetSoc < 0 || targetSoc > 100) {
+        this.status(this.tr("sellingTargetSocError"), true);
+        return;
+      }
+      this.act("add_selling_range", {date:dateKeyFor(this._manualDialogDay), start, target_soc:targetSoc})
+        .then(done => { if (done) { this._manualDialogDay = ""; this.render(); } });
     });
+    this.shadowRoot.querySelectorAll("[data-range-soc-date]").forEach(el => el.addEventListener("change", event => {
+      const targetSoc = Number(event.target.value);
+      if (!Number.isFinite(targetSoc) || targetSoc < 0 || targetSoc > 100) {
+        this.status(this.tr("sellingTargetSocError"), true);
+        return;
+      }
+      this.act("set_selling_range_soc", {date:event.target.dataset.rangeSocDate,
+        start:event.target.dataset.rangeSocStart, target_soc:targetSoc});
+    }));
+    this.shadowRoot.querySelectorAll("[data-stop-selling]").forEach(el => el.addEventListener("click", () =>
+      this.act("stop_selling", {}, this.tr("sellingStopConfirm"))));
     this.shadowRoot.querySelectorAll("[data-approve-date]").forEach(el => el.addEventListener("change", event =>
       this.act("approve_selling_range", {date:event.target.dataset.approveDate,
         start:event.target.dataset.approveStart, approved:event.target.checked})));
