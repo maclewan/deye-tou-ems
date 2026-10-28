@@ -1,6 +1,6 @@
 # Advanced usage and safety
 
-This page contains the detailed behavior and safety notes for Deye TOU Manager. For installation and the three main workflows, start with the [README](../README.md).
+This page contains the detailed behavior and safety notes for Deye TOU EMS. For installation and the three main workflows, start with the [README](../README.md).
 
 ## Setup details
 

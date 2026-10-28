@@ -247,7 +247,7 @@ def resolve_work_mode_entity(hass: HomeAssistant, configured: str | None) -> str
         _LOGGER.warning("No Deye Work Mode entity found yet; using the legacy entity ID")
         return LEGACY_WORK_MODE_ENTITY
     raise HomeAssistantError(
-        "Multiple Work Mode entities found; choose work_mode_entity in Deye TOU Manager options"
+        "Multiple Work Mode entities found; choose work_mode_entity in Deye TOU EMS options"
     )
 
 

@@ -1,4 +1,4 @@
-/* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
+/* Deye TOU EMS: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
 const ACTION_LOG_MODE_KEY = "deye-tou-action-log-mode";
 const CARD_TRANSLATION_VERSION = "1.0.0";
@@ -405,7 +405,7 @@ if (!customElements.get("deye-tou-manager-card"))
   customElements.define("deye-tou-manager-card", DeyeTouManagerCard);
 window.customCards = window.customCards || [];
 if (!window.customCards.some(card => card.type === "deye-tou-manager-card"))
-  window.customCards.push({type:"deye-tou-manager-card",name:"Deye TOU Manager",description:"Presets and weekly schedule"});
+  window.customCards.push({type:"deye-tou-manager-card",name:"Deye TOU EMS",description:"Presets and weekly schedule"});
 
 class DeyeTouSellingCard extends DeyeTouManagerCard {
   constructor() {
