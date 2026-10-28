@@ -123,6 +123,8 @@
   "sellingTargetSocError": "Wybierz docelowy SOC od 0 do 100.",
   "sellingStop": "STOP",
   "sellingStopConfirm": "Zatrzymać ten okres sprzedaży i przywrócić poprzednie ustawienia falownika?",
+  "sellingRestart": "WZNÓW",
+  "sellingRestartConfirm": "Wznowić ten zakończony okres sprzedaży na pozostałą część godziny?",
   "sellingCancel": "Anuluj",
   "historyTitle": "Historia sprzedaży",
   "historySubtitle": "Zmierzony godzinowy eksport netto i przychód według RCE. Jeden zapisany dzień na stronę.",

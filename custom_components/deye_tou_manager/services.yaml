@@ -230,3 +230,17 @@ set_selling_range_soc:
 stop_selling:
   name: Stop active selling
   description: Restore the previous Work Mode and TOU SOC, then mark the active selling period complete.
+restart_selling:
+  name: Restart completed selling period
+  description: Restart a completed period only while its original one-hour window is still active.
+  fields:
+    date:
+      name: Plan date (YYYY-MM-DD)
+      required: true
+      selector:
+        text:
+    start:
+      name: Start time (HH:MM)
+      required: true
+      selector:
+        text:

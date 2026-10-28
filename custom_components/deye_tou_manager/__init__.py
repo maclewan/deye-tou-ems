@@ -45,7 +45,7 @@ LEGACY_WORK_MODE_ENTITY = "select.deye_inverter_esp32_system_work_mode"
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 _LOGGER = logging.getLogger(__name__)
 CARD_URL = "/api/deye_tou_manager/deye-tou-manager-card.js"
-CARD_VERSION = "0.6.5"
+CARD_VERSION = "0.6.6"
 CARD_RESOURCE_URL = f"{CARD_URL}?v={CARD_VERSION}"
 CARD_PATH = Path(__file__).parent / "frontend" / "deye-tou-manager-card.js"
 CARD_TRANSLATION_URL = "/api/deye_tou_manager/card-{language}.json"
@@ -377,7 +377,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     for service in ("save_current", "save_definition", "delete", "assign_day", "apply", "set_auto",
                     "set_selling_settings", "refresh_selling_plan", "clear_selling_plans",
                     "add_selling_range", "approve_selling_range", "set_selling_range_soc",
-                    "stop_selling"):
+                    "stop_selling", "restart_selling"):
         hass.services.async_remove(DOMAIN, service)
     hass.states.async_remove(ENTITY)
     hass.states.async_remove(REVENUE_ENTITY)
@@ -792,7 +792,10 @@ async def _async_start_manager(
                             or (midnight_check and settings["mode"] == "automatic")
                         )
                     )
-                    if preserve_approval and old_range.get("completed"):
+                    # Completion is terminal for this date/start, including a
+                    # manual STOP. A later price refresh must not revive a
+                    # period while its one-hour window is still relevant.
+                    if old_range.get("completed"):
                         selling_range["completed"] = True
                         selling_range["completion_reason"] = old_range.get(
                             "completion_reason", "completed"
@@ -1228,6 +1231,28 @@ async def _async_start_manager(
                 raise HomeAssistantError("No selling period is currently active")
             await restore_selling_locked("stopped manually")
 
+    async def restart_selling(call: ServiceCall) -> None:
+        """Explicitly restart a completed period while its hour is still active."""
+        async with lock:
+            if selling["settings"]["mode"] == "off" or not selling["settings"]["control_enabled"]:
+                raise HomeAssistantError("Enable selling mode and inverter control before restarting")
+            if selling.get("session") is not None:
+                raise HomeAssistantError("A selling period is already active")
+            date_key, start = call.data["date"], call.data["start"]
+            selling_range = next((item for item in selling["plans"].get(date_key, {}).get("ranges", [])
+                                  if item.get("start") == start), None)
+            if selling_range is None or not selling_range.get("completed"):
+                raise HomeAssistantError("Only a completed selling period can be restarted")
+            now = dt_util.now()
+            period_start, period_end = range_bounds(date_key, selling_range, now)
+            if not period_start <= now < period_end:
+                raise HomeAssistantError("A selling period can only be restarted during its own hour")
+            selling_range["completed"] = False
+            selling_range.pop("completion_reason", None)
+            selling_range["approved"] = True
+            await persist()
+            await start_selling_locked(date_key, selling_range, now)
+
     async def run_scheduled(reason: str) -> None:
         """Apply today's assignment after ESPHome reconnects, if enabled."""
         nonlocal last_automatic
@@ -1319,6 +1344,10 @@ async def _async_start_manager(
             vol.Required("target_soc"): object,
         }))
     hass.services.async_register(DOMAIN, "stop_selling", stop_selling)
+    hass.services.async_register(DOMAIN, "restart_selling", restart_selling,
+        schema=vol.Schema({
+            vol.Required("date"): str, vol.Required("start"): str,
+        }))
 
     @callback
     def at_midnight(_now) -> None:

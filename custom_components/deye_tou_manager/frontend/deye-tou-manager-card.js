@@ -1,6 +1,6 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
-const CARD_TRANSLATION_VERSION = "0.6.5";
+const CARD_TRANSLATION_VERSION = "0.6.6";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();
@@ -455,7 +455,7 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
           ${(() => { const active = selling.session?.date === dateKey && selling.session?.start === range.start;
             const targetSoc = Number.isFinite(Number(range.target_soc)) ? Number(range.target_soc) : settings.min_soc;
             return `<label class="range-soc">${this.h("sellingTargetSoc")}<input type="number" min="0" max="100" step="1" data-range-soc-date="${dateKey}" data-range-soc-start="${this.escape(range.start)}" value="${this.escape(targetSoc)}" ${active ? "disabled" : ""}></label>
-              ${active ? `<button class="stop" data-stop-selling>${this.h("sellingStop")}</button>` : `<label class="approval"><input type="checkbox" data-approve-date="${dateKey}" data-approve-start="${this.escape(range.start)}" ${range.approved ? "checked" : ""}
+              ${active ? `<button class="stop" data-stop-selling>${this.h("sellingStop")}</button>` : range.completed ? `<button data-restart-date="${dateKey}" data-restart-start="${this.escape(range.start)}">${this.h("sellingRestart")}</button>` : `<label class="approval"><input type="checkbox" data-approve-date="${dateKey}" data-approve-start="${this.escape(range.start)}" ${range.approved ? "checked" : ""}
                 ${settings.mode === "semi" ? "" : "disabled"}>${this.h("sellingApproved")}</label>`}`; })()}
           <small>${range.manual ? this.h("sellingManualNote") : range.hours.map(hour => `${this.escape(hour.start)} ${this.escape(hour.price)}`).join(" · ")}</small></div>`).join("")
           : `<p class="muted">${this.h("sellingBelowThreshold")}</p>`}${addManual}
@@ -575,6 +575,9 @@ class DeyeTouSellingCard extends DeyeTouManagerCard {
     }));
     this.shadowRoot.querySelectorAll("[data-stop-selling]").forEach(el => el.addEventListener("click", () =>
       this.act("stop_selling", {}, this.tr("sellingStopConfirm"))));
+    this.shadowRoot.querySelectorAll("[data-restart-date]").forEach(el => el.addEventListener("click", () =>
+      this.act("restart_selling", {date:el.dataset.restartDate, start:el.dataset.restartStart},
+        this.tr("sellingRestartConfirm"))));
     this.shadowRoot.querySelectorAll("[data-approve-date]").forEach(el => el.addEventListener("change", event =>
       this.act("approve_selling_range", {date:event.target.dataset.approveDate,
         start:event.target.dataset.approveStart, approved:event.target.checked})));

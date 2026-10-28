@@ -79,7 +79,7 @@ After UI setup or a YAML configuration check and restart, `sensor.deye_tou_prese
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.5
+/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.6
 ```
 
 If you use YAML-mode dashboard resources, update your Lovelace `resources:` entry manually to this URL with `type: module`; the integration cannot edit your YAML file. Remove the old `/local/deye-tou-manager-card.js?v=3` entry so there is only one resource for this card.
@@ -123,6 +123,7 @@ The integration also registers these Home Assistant actions:
 | `deye_tou_manager.approve_selling_range` | Approve or unapprove one semi-automatic selling hour | May start selling when its period is active and control is enabled |
 | `deye_tou_manager.set_selling_range_soc` | Set one period's stop SOC | No |
 | `deye_tou_manager.stop_selling` | Stop the active period and restore the prior settings | Yes |
+| `deye_tou_manager.restart_selling` | Restart a completed period during its original hour | Yes |
 
 Presets and assignments are stored by Home Assistant in `/config/.storage/deye_tou_manager`. Presets use stable SHA-256 keys, while names remain editable labels; weekday assignments reference those keys. Existing name-keyed storage is migrated automatically on the first startup with this release. Back up the storage file before upgrading, and do not edit the live file by hand. Existing service calls by name still work; to rename through `save_definition`, pass the existing key from the sensor's `preset_ids` attribute as `preset_id` with the new `name`.
 
@@ -140,7 +141,7 @@ The separate `custom:deye-tou-selling-card` uses the Lewa-Reka [RCE PSE integrat
 
 Choose Off, semi-automatic approval, or automatic approval in the card. At 18:00 Home Assistant local time the manager plans tomorrow; at 00:00:15 it recalculates today. Each selected one-hour block has its own approval and a target SOC. It defaults to the global minimum SOC, but can be changed per block before it starts. Automatic mode approves every valid block during the midnight recheck. Semi-automatic mode requires each checkbox to be approved separately. An unchanged block retains its approval, while changed settings, changed prices, or missing price data revoke it. **Add manual selling hour** in either day's plan opens a dialog for the one-hour start time and target SOC; start times are limited to `:00`, `:15`, `:30`, or `:45`. It still has an individual approval and survives price checks. **Clear findings** removes both calculated and manual hours.
 
-Physical selling is disabled by default. In the integration's **Configure** options, select the Battery BMS SOC sensor (normally `sensor.{prefix}_battery_bms_soc`), then explicitly enable **Enable inverter control** in the selling card. During an approved active period, the integration snapshots the live plan before setting only Work Mode to `Selling First` and the current TOU slot's SOC to that period's target. It checks the SOC every 15 seconds; on reaching the target or at period end, it restores the saved Work Mode and slot SOC, marks the range completed, and will not restart it if SOC rebounds. While it runs, its approval and target-SOC controls are disabled and a **STOP** button restores the snapshot and completes that period. The snapshot is persisted before any write and is recovered after Home Assistant startup. While a selling session is active, the midnight weekly schedule is suppressed. Missing SOC or failed reads/writes result in a restore attempt and an error, rather than a new sell attempt.
+Physical selling is disabled by default. In the integration's **Configure** options, select the Battery BMS SOC sensor (normally `sensor.{prefix}_battery_bms_soc`), then explicitly enable **Enable inverter control** in the selling card. During an approved active period, the integration snapshots the live plan before setting only Work Mode to `Selling First` and the current TOU slot's SOC to that period's target. It checks the SOC every 15 seconds; on reaching the target or at period end, it restores the saved Work Mode and slot SOC, marks the range completed, and will not restart it if SOC rebounds. While it runs, its approval and target-SOC controls are disabled and a **STOP** button restores the snapshot and completes that period. A completed period offers **RESTART** only as an explicit confirmed action during the remainder of its original hour. The snapshot is persisted before any write and is recovered after Home Assistant startup. While a selling session is active, the midnight weekly schedule is suppressed. Missing SOC or failed reads/writes result in a restore attempt and an error, rather than a new sell attempt.
 
 ### Export and revenue ledger
 
@@ -164,7 +165,7 @@ After the meters are configured, startup and each hourly run backfill one 31-day
 
 1. Back up `/config/.storage/deye_tou_manager`.
 2. Install this repository through HACS. You can keep the existing `deye_tou_manager:` entry in `configuration.yaml`, or remove it and use the UI setup flow after restarting.
-3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.5` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for all three cards.
+3. In storage-mode dashboard resources, the integration replaces `/local/deye-tou-manager-card.js?v=3` with `/api/deye_tou_manager/deye-tou-manager-card.js?v=0.6.6` and removes duplicates automatically on startup. In YAML resource mode, replace the entry yourself and keep only one resource for all three cards.
 4. Check the Home Assistant configuration, restart, and refresh the dashboard. Confirm your presets, weekday assignments, and automation setting before applying anything.
 
 The integration domain and `Store(hass, 1, "deye_tou_manager")` storage key are unchanged. This release migrates the preset and assignment format in that same storage file automatically; verify your presets and weekday assignments after restarting. The old `/config/www/deye-tou-manager-card.js` may remain unused during verification. The older `packages/deye_tou_presets.yaml` is separate; do not run its TOU script or an older midnight automation alongside this integration.

@@ -156,6 +156,15 @@ sellingCard.hass = { states: {
 } };
 assert.match(sellingCard.shadowRoot.innerHTML, /data-stop-selling/);
 assert.doesNotMatch(sellingCard.shadowRoot.innerHTML, /data-approve-date="2026-10-26"/);
+sellingCard.hass = { states: {
+  "sensor.deye_tou_preset_manager": { attributes: {
+    ha_local_date: "2026-10-26",
+    selling: {settings: {mode:"semi", threshold:.5, max_ranges:2, time_of_day:"afternoon", min_soc:30},
+      plans: {"2026-10-26": {date:"2026-10-26", source_entity:"sensor.rce_pse_price",
+        ranges:[{start:"18:00", end:"19:00", target_soc:42, completed:true, hours:[]}]}}, error:""},
+  } },
+} };
+assert.match(sellingCard.shadowRoot.innerHTML, /data-restart-date="2026-10-26"/);
 const HistoryCard = registry.get("deye-tou-selling-history-card");
 assert.ok(HistoryCard, "revenue history card registers from the same dashboard resource");
 const historyCard = new HistoryCard();
@@ -197,7 +206,7 @@ async function testRename() {
   assert.equal(card._editor.presetId, "stable-hash-id");
   assert.equal(card._pendingSavedName, null);
   global.fetch = async url => {
-    assert.match(url, /card-pl\.json\?v=0\.6\.5$/);
+    assert.match(url, /card-pl\.json\?v=0\.6\.6$/);
     return { ok: true, json: async () => polish };
   };
   card.hass = { ...card._hass, language: "pl" };
@@ -218,8 +227,8 @@ async function testRename() {
   const uncachedCard = new Card();
   uncachedCard.setConfig({});
   global.fetch = async url => {
-    if (/card-pl\.json\?v=0\.6\.5$/.test(url)) return { ok: false };
-    assert.match(url, /card-en\.json\?v=0\.6\.5$/);
+    if (/card-pl\.json\?v=0\.6\.6$/.test(url)) return { ok: false };
+    assert.match(url, /card-en\.json\?v=0\.6\.6$/);
     return { ok: true, json: async () => english };
   };
   uncachedCard.hass = { language: "pl", states: {} };

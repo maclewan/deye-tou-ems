@@ -900,6 +900,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         soc_entity = "sensor.deye_inverter_esp32_battery_bms_soc"
         self.hass.states.async_set(soc_entity, "80")
         now = datetime(2026, 10, 26, 18, 20)
+        put_rce_prices(self.hass, date(2026, 10, 26), "price")
         with patch.object(MANAGER.dt_util, "now", return_value=now):
             await self.call("set_selling_settings", mode="semi", control_enabled=True,
                             min_soc=35, battery_soc_entity=soc_entity)
@@ -908,12 +909,18 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             self.hass.selling_tick_callback(None)
             await self.hass.finish_tasks()
             await self.call("stop_selling")
+            await self.call("refresh_selling_plan", day="today")
         work_mode = MANAGER.eid(TEST_PREFIX, "select", "system_work_mode")
         self.assertEqual(self.hass.states[work_mode].state, "Zero Export To CT")
         selling_range = self.hass.saved["selling"]["plans"]["2026-10-26"]["ranges"][0]
         self.assertTrue(selling_range["completed"])
         self.assertEqual(selling_range["completion_reason"], "stopped manually")
         self.assertIsNone(self.hass.saved["selling"]["session"])
+        with patch.object(MANAGER.dt_util, "now", return_value=now + timedelta(minutes=10)):
+            await self.call("restart_selling", date="2026-10-26", start="18:15")
+        self.assertEqual(self.hass.states[work_mode].state, "Selling First")
+        self.assertFalse(self.hass.saved["selling"]["plans"]["2026-10-26"]["ranges"][0]["completed"])
+        self.assertIsNotNone(self.hass.saved["selling"]["session"])
 
     async def test_startup_recovers_an_interrupted_selling_session(self):
         snapshot = sample_preset()
