@@ -1,7 +1,7 @@
 /* Deye TOU Manager: standalone Lovelace card, no external JS dependencies. */
 const CARD_LANGUAGE_KEY = "deye-tou-manager-card-language";
 const ACTION_LOG_MODE_KEY = "deye-tou-action-log-mode";
-const CARD_TRANSLATION_VERSION = "1.1.0";
+const CARD_TRANSLATION_VERSION = "1.0.0";
 class DeyeTouManagerCard extends HTMLElement {
   constructor() {
     super();

@@ -2,7 +2,7 @@
 
 <img src="brand/icon.png" alt="Deye TOU EMS icon" width="96">
 
-[![Validate](https://github.com/maclewan/deye-tou-manager/actions/workflows/validate.yml/badge.svg)](https://github.com/maclewan/deye-tou-manager/actions/workflows/validate.yml)
+[![Validate](https://github.com/maclewan/deye-tou-ems/actions/workflows/validate.yml/badge.svg)](https://github.com/maclewan/deye-tou-ems/actions/workflows/validate.yml)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](#installation)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -40,7 +40,7 @@ The slot voltage entities and the inverter's global Battery Grid Charging permis
 ### HACS (recommended)
 
 1. In HACS, open the menu and choose **Custom repositories**.
-2. Add `https://github.com/maclewan/deye-tou-manager` with category **Integration**.
+2. Add `https://github.com/maclewan/deye-tou-ems` with category **Integration**.
 3. Find this integration in HACS and install it.
 4. Restart Home Assistant, then open **Settings → Devices & services → Add integration**, search for **Deye TOU Preset Manager**, and choose the inverter's Work Mode entity.
 
@@ -55,7 +55,7 @@ After setup, `sensor.deye_tou_preset_manager` contains the integration data.
 With dashboard resources in storage mode (Home Assistant's default), the integration automatically keeps one JavaScript module resource for both cards at:
 
 ```text
-/api/deye_tou_manager/deye-tou-manager-card.js?v=1.1.0
+/api/deye_tou_manager/deye-tou-manager-card.js?v=1.0.0
 ```
 
 Add a manual card to your dashboard:
